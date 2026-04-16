@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/app_state.dart';
+import '../services/ai_pipeline.dart';
+import '../services/sync_prefs.dart';
 import '../sms/sms_service.dart';
 import '../widgets/bubble_card.dart';
 
@@ -32,32 +34,92 @@ class _SmsSyncScreenState extends State<SmsSyncScreen> {
       }
       return;
     }
+    final useAi = await SyncPrefs.aiMode();
     try {
-      final res = await _sms.scanInbox(since: since);
-      if (mounted) {
-        await context.read<AppState>().refreshAll();
-        setState(() {
-          _busy = false;
-          _lastStatus =
-              'Scanned ${res.scanned} · imported ${res.imported} · '
-                  'queued ${res.queued} · deduped ${res.deduped}';
-        });
+      if (useAi) {
+        await _aiScan(since);
+      } else {
+        final res = await _sms.scanInbox(since: since);
+        if (mounted) {
+          await context.read<AppState>().refreshAll();
+          setState(() {
+            _lastStatus =
+                'Scanned ${res.scanned} · imported ${res.imported} · '
+                    'queued ${res.queued} · deduped ${res.deduped}';
+          });
+        }
       }
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _busy = false;
-          _lastStatus = 'Scan failed: $e';
-        });
+        setState(() => _lastStatus = 'Scan failed: $e');
       }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _aiScan(DateTime since) async {
+    final items = await _sms.fetchRawForAi(since: since);
+    if (!mounted) return;
+
+    // Pre-flight confirmation with cost estimate.
+    final estInr = AiPipeline.estimateInrRounded(smsCount: items.length, emailCount: 0);
+    final estUsd = AiPipeline.estimateUsd(smsCount: items.length, emailCount: 0);
+    final proceed = await _confirmCost(items.length, estInr, estUsd);
+    if (!proceed) {
+      setState(() => _lastStatus = 'Cancelled.');
+      return;
+    }
+
+    setState(() => _lastStatus = 'Starting AI classification…');
+    final state = context.read<AppState>();
+    final res = await state.runAiSync(
+      fetch: () async => items,
+      onProgress: (p) {
+        if (mounted) {
+          setState(() {
+            _lastStatus =
+                'Batch ${p.batchIndex}/${p.totalBatches} · '
+                    '${p.itemsDone}/${p.itemsTotal} items · '
+                    '\$${p.usdSpent.toStringAsFixed(4)}';
+          });
+        }
+      },
+    );
+    if (mounted) {
+      setState(() {
+        _lastStatus =
+            'Done · ${res.imported} imported · ${res.dismissed} dismissed · '
+                '${res.kept} kept · \$${res.usdCost.toStringAsFixed(4)}';
+      });
+    }
+  }
+
+  Future<bool> _confirmCost(int count, int inr, double usd) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Run AI classification?'),
+        content: Text(
+          '$count items will be sent to Claude Haiku.\n\n'
+          'Estimated cost: ~\$${usd.toStringAsFixed(3)} (~₹$inr).\n\n'
+          'Dedup and category assignment are handled automatically. '
+          'Low-confidence items land in Review.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Proceed')),
+        ],
+      ),
+    );
+    return ok == true;
   }
 
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
       initialDate: DateTime.now().subtract(const Duration(days: 30)),
-      firstDate: DateTime(2020),
+      firstDate: DateTime.now().subtract(const Duration(days: 90)),
       lastDate: DateTime.now(),
     );
     if (picked != null) {
@@ -151,7 +213,6 @@ class _SmsSyncScreenState extends State<SmsSyncScreen> {
                     _presetButton('Last 7 days', const Duration(days: 7)),
                     _presetButton('Last 30 days', const Duration(days: 30)),
                     _presetButton('Last 90 days', const Duration(days: 90)),
-                    _presetButton('All time', null),
                     OutlinedButton.icon(
                       onPressed: _busy ? null : _pickDate,
                       icon: const Icon(Icons.event_rounded, size: 18),

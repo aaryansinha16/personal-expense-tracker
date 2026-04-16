@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' hide Category;
 import '../db/database.dart';
 import '../db/models.dart';
 import '../email/sender_registry.dart';
+import '../services/ai_pipeline.dart';
 import '../services/ai_triage.dart';
 import '../services/daily_budget.dart';
 import '../services/insights.dart';
@@ -167,47 +168,24 @@ class AppState extends ChangeNotifier {
   /// - High/medium-confidence is_transaction: false → dismiss from queue.
   /// - Low confidence → leave in queue with the reasoning attached so the
   ///   user sees why AI was unsure.
-  Future<AiTriageApplyResult> aiTriageAll() async {
-    final items = <TriageItem>[];
-    final smsById = <int, PendingSms>{};
-    final emailById = <int, PendingEmail>{};
-    for (final s in pendingSms) {
-      smsById[s.id!] = s;
-      items.add(TriageItem(
-        queueId: s.id!,
-        source: 'sms',
-        sender: s.sender,
-        body: s.body,
-      ));
-    }
-    for (final e in pendingEmails) {
-      emailById[e.id!] = e;
-      items.add(TriageItem(
-        queueId: e.id!,
-        source: 'email',
-        sender: e.sender,
-        subject: e.subject,
-        body: e.body,
-      ));
-    }
-    if (items.isEmpty) {
-      return AiTriageApplyResult(imported: 0, dismissed: 0, kept: 0, usdCost: 0);
-    }
-
-    final categoryNames = categories.map((c) => c.name).toList();
-    final result = await AiTriageService.instance
-        .triage(items, categories: categoryNames);
-
+  /// Apply a batch of AI decisions (each tied to a TriageItem) to the DB.
+  /// Returns counts and total USD cost. Used by both the manual "AI triage
+  /// all" button on Review and the AI-first sync pipeline.
+  Future<AiTriageApplyResult> applyAiDecisions(
+    List<TriageItem> items,
+    List<AiDecision> decisions, {
+    required double usdSpent,
+    bool removeFromQueue = true,
+  }) async {
     int imported = 0;
     int dismissed = 0;
     int kept = 0;
 
     for (var i = 0; i < items.length; i++) {
-      if (i >= result.decisions.length) break;
+      if (i >= decisions.length) break;
       final it = items[i];
-      final d = result.decisions[i];
+      final d = decisions[i];
       final lowConfidence = d.confidence == 'low';
-
       if (lowConfidence) {
         kept++;
         continue;
@@ -235,11 +213,12 @@ class AppState extends ChangeNotifier {
         dismissed++;
       }
 
-      // Remove from queue regardless (unless kept for low confidence).
-      if (it.source == 'sms' && smsById.containsKey(it.queueId)) {
-        await _db.deletePendingSms(it.queueId);
-      } else if (it.source == 'email' && emailById.containsKey(it.queueId)) {
-        await _db.deletePendingEmail(it.queueId);
+      if (removeFromQueue) {
+        if (it.source == 'sms') {
+          await _db.deletePendingSms(it.queueId);
+        } else if (it.source == 'email') {
+          await _db.deletePendingEmail(it.queueId);
+        }
       }
     }
 
@@ -248,7 +227,67 @@ class AppState extends ChangeNotifier {
       imported: imported,
       dismissed: dismissed,
       kept: kept,
-      usdCost: result.cost.usd,
+      usdCost: usdSpent,
+    );
+  }
+
+  /// AI-first sync for a single source. Fetches raw items from [fetch],
+  /// runs them through the pipeline, applies decisions. Caller displays
+  /// progress via [onProgress].
+  Future<AiTriageApplyResult> runAiSync({
+    required Future<List<TriageItem>> Function() fetch,
+    required void Function(PipelineProgress) onProgress,
+  }) async {
+    final items = await fetch();
+    if (items.isEmpty) {
+      return AiTriageApplyResult(imported: 0, dismissed: 0, kept: 0, usdCost: 0);
+    }
+    final categoryNames = categories.map((c) => c.name).toList();
+    final pipeline = AiPipeline();
+    final result = await pipeline.classifyAll(
+      items,
+      categories: categoryNames,
+      onProgress: onProgress,
+    );
+    return applyAiDecisions(
+      items,
+      result.decisions,
+      usdSpent: result.usdSpent,
+      removeFromQueue: false, // fetch didn't pull from queue
+    );
+  }
+
+  Future<AiTriageApplyResult> aiTriageAll() async {
+    final items = <TriageItem>[];
+    for (final s in pendingSms) {
+      items.add(TriageItem(
+        queueId: s.id!,
+        source: 'sms',
+        sender: s.sender,
+        body: s.body,
+      ));
+    }
+    for (final e in pendingEmails) {
+      items.add(TriageItem(
+        queueId: e.id!,
+        source: 'email',
+        sender: e.sender,
+        subject: e.subject,
+        body: e.body,
+      ));
+    }
+    if (items.isEmpty) {
+      return AiTriageApplyResult(imported: 0, dismissed: 0, kept: 0, usdCost: 0);
+    }
+
+    final categoryNames = categories.map((c) => c.name).toList();
+    final pipeline = AiPipeline();
+    final result = await pipeline.classifyAll(items, categories: categoryNames);
+
+    return applyAiDecisions(
+      items,
+      result.decisions,
+      usdSpent: result.usdSpent,
     );
   }
 
