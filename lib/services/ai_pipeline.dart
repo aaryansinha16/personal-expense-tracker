@@ -58,6 +58,8 @@ class AiPipeline {
         decisions.addAll(res.decisions);
         totalUsd += res.cost.usd;
       } catch (e) {
+        // Return what we have so the caller can apply partial results, and
+        // surface the error message so the UI can display it.
         return PipelineResult(
           decisions: decisions,
           usdSpent: totalUsd,

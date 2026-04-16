@@ -12,6 +12,7 @@ class AiSettingsScreen extends StatefulWidget {
 
 class _AiSettingsScreenState extends State<AiSettingsScreen> {
   final _ctrl = TextEditingController();
+  final _modelCtrl = TextEditingController();
   bool _hasKey = false;
   bool _busy = false;
   String? _status;
@@ -27,6 +28,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
   @override
   void dispose() {
     _ctrl.dispose();
+    _modelCtrl.dispose();
     super.dispose();
   }
 
@@ -34,9 +36,19 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     final key = await AiTriageService.instance.getApiKey();
     _ctrl.text = key == null ? '' : _masked(key);
     _hasKey = key != null;
+    _modelCtrl.text = await AiTriageService.instance.getModel();
     _cumUsd = await AiTriageService.instance.getCumulativeUsd();
     _items = await AiTriageService.instance.getItemsTriaged();
     if (mounted) setState(() {});
+  }
+
+  Future<void> _saveModel() async {
+    await AiTriageService.instance.setModel(_modelCtrl.text);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Model saved')),
+      );
+    }
   }
 
   String _masked(String key) {
@@ -134,6 +146,33 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                   const SizedBox(height: 12),
                   Text(_status!, style: TextStyle(color: scheme.onSurface.withOpacity(0.75))),
                 ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          const SectionHeader(title: 'MODEL'),
+          BubbleCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: _modelCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Anthropic model ID',
+                    prefixIcon: Icon(Icons.memory_rounded),
+                    hintText: 'claude-haiku-4-5',
+                  ),
+                  autocorrect: false,
+                ),
+                const SizedBox(height: 12),
+                FilledButton(onPressed: _saveModel, child: const Text('Save model')),
+                const SizedBox(height: 8),
+                Text(
+                  'Defaults to claude-haiku-4-5. Override only if you see an '
+                  '"invalid_request_error: model not found" — swap to '
+                  'claude-3-5-haiku-20241022 as a known-good fallback.',
+                  style: TextStyle(color: scheme.onSurface.withOpacity(0.55), fontSize: 11.5),
+                ),
               ],
             ),
           ),

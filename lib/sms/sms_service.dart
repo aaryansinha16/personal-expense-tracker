@@ -66,8 +66,11 @@ class SmsService {
         source: 'sms',
         sender: sender,
         body: body,
+        sourceId: hash,
+        sourceDate: DateTime.fromMillisecondsSinceEpoch(ts),
       ));
-      await db.markSmsProcessed(hash);
+      // NOTE: do NOT mark SMS processed here. Caller marks it AFTER the AI
+      // decision has been applied.
     }
     return items;
   }

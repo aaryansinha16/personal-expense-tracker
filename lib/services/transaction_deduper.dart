@@ -63,8 +63,10 @@ class TransactionDeduper {
     if (merchantMatch) return true;
 
     // Cross-source heuristic: different sources, same amount + day + type,
-    // amount above a coincidence threshold.
-    if (a.source != b.source && b.amount >= 100) return true;
+    // amount above a small coincidence threshold. Two real independent
+    // transactions of the exact same amount on the exact same day from the
+    // same category of source (SMS and email) are vanishingly rare.
+    if (a.source != b.source && b.amount >= 10) return true;
 
     return false;
   }
