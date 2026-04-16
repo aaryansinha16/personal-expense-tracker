@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../db/database.dart';
 import '../providers/app_state.dart';
 import '../sms/sms_service.dart';
 import '../widgets/bubble_card.dart';
