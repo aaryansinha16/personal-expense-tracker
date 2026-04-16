@@ -16,7 +16,7 @@ class AppDb {
     final path = p.join(dir, 'expense_tracker.db');
     _db = await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -35,6 +35,9 @@ class AppDb {
     }
     if (oldVersion < 5) {
       await db.execute(_pendingEmailsSchema);
+    }
+    if (oldVersion < 6) {
+      await db.execute(_pendingRawItemsSchema);
     }
   }
 
@@ -77,6 +80,21 @@ class AppDb {
       body TEXT NOT NULL,
       received_at INTEGER NOT NULL,
       reason TEXT
+    )
+  ''';
+
+  /// Raw fetched items pending AI classification. Populated by Gmail/SMS
+  /// fetch, drained by applyAiDecisions. Carries each item over between
+  /// sync attempts so a failed AI call doesn't cost a re-fetch.
+  static const _pendingRawItemsSchema = '''
+    CREATE TABLE pending_raw_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      source_id TEXT NOT NULL UNIQUE,
+      sender TEXT NOT NULL,
+      subject TEXT,
+      body TEXT NOT NULL,
+      received_at INTEGER NOT NULL
     )
   ''';
 
@@ -140,6 +158,7 @@ class AppDb {
     await db.execute(_processedEmailsSchema);
     await db.execute(_emailSendersSchema);
     await db.execute(_pendingEmailsSchema);
+    await db.execute(_pendingRawItemsSchema);
 
     await _seedCategories(db);
   }
@@ -382,6 +401,56 @@ class AppDb {
 
   Future<int> deleteRecurringExpense(int id) async =>
       (await db).delete('recurring_expenses', where: 'id=?', whereArgs: [id]);
+
+  // Pending raw items (cache of fetched SMS/emails awaiting AI)
+  Future<void> insertPendingRawItem({
+    required String source,
+    required String sourceId,
+    required String sender,
+    String? subject,
+    required String body,
+    required DateTime receivedAt,
+  }) async {
+    final d = await db;
+    await d.insert(
+      'pending_raw_items',
+      {
+        'source': source,
+        'source_id': sourceId,
+        'sender': sender,
+        'subject': subject,
+        'body': body,
+        'received_at': receivedAt.millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
+  Future<List<Map<String, Object?>>> listPendingRawItems() async {
+    final d = await db;
+    return d.query('pending_raw_items', orderBy: 'received_at DESC');
+  }
+
+  Future<Set<String>> pendingRawSourceIds({String? source}) async {
+    final d = await db;
+    final rows = await d.query(
+      'pending_raw_items',
+      columns: ['source_id'],
+      where: source == null ? null : 'source = ?',
+      whereArgs: source == null ? null : [source],
+    );
+    return rows.map((r) => r['source_id'] as String).toSet();
+  }
+
+  Future<void> deletePendingRawItemBySourceId(String sourceId) async {
+    final d = await db;
+    await d.delete('pending_raw_items', where: 'source_id = ?', whereArgs: [sourceId]);
+  }
+
+  Future<void> clearPendingRawItems() async {
+    final d = await db;
+    await d.delete('pending_raw_items');
+  }
 
   // Pending emails (Review queue for email imports)
   Future<int> insertPendingEmail(PendingEmail e) async {

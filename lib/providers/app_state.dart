@@ -251,6 +251,8 @@ class AppState extends ChangeNotifier {
         } else if (it.source == 'email') {
           await _db.markEmailProcessed(it.sourceId!);
         }
+        // Drain the raw cache as each decision is applied.
+        await _db.deletePendingRawItemBySourceId(it.sourceId!);
       }
     }
 

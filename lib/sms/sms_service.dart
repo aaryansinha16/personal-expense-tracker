@@ -48,9 +48,27 @@ class SmsService {
   /// cheap financial pre-filter (amount + a verb OR a known sender). Does
   /// NOT insert anything; caller handles that via AppState.applyAiDecisions.
   Future<List<TriageItem>> fetchRawForAi({DateTime? since}) async {
-    final messages = await fetchRaw(since: since);
     final db = AppDb.instance;
+
+    // 1) Resume any items cached from a previous failed sync.
     final items = <TriageItem>[];
+    final cachedIds = <String>{};
+    for (final row in await db.listPendingRawItems()) {
+      if ((row['source'] as String?) != 'sms') continue;
+      final sid = row['source_id'] as String;
+      cachedIds.add(sid);
+      items.add(TriageItem(
+        queueId: -1,
+        source: 'sms',
+        sender: row['sender'] as String,
+        body: row['body'] as String,
+        sourceId: sid,
+        sourceDate: DateTime.fromMillisecondsSinceEpoch(row['received_at'] as int),
+      ));
+    }
+
+    // 2) Walk the inbox, appending new items and caching them.
+    final messages = await fetchRaw(since: since);
     for (final m in messages) {
       final sender = m.address ?? '';
       final body = m.body ?? '';
@@ -60,17 +78,24 @@ class SmsService {
       if (!knownSender && !looksFinancial) continue;
       final ts = m.date ?? DateTime.now().millisecondsSinceEpoch;
       final hash = _hashSms(sender, body, ts);
+      if (cachedIds.contains(hash)) continue;
       if (await db.isSmsProcessed(hash)) continue;
+      final date = DateTime.fromMillisecondsSinceEpoch(ts);
       items.add(TriageItem(
         queueId: -1,
         source: 'sms',
         sender: sender,
         body: body,
         sourceId: hash,
-        sourceDate: DateTime.fromMillisecondsSinceEpoch(ts),
+        sourceDate: date,
       ));
-      // NOTE: do NOT mark SMS processed here. Caller marks it AFTER the AI
-      // decision has been applied.
+      await db.insertPendingRawItem(
+        source: 'sms',
+        sourceId: hash,
+        sender: sender,
+        body: body,
+        receivedAt: date,
+      );
     }
     return items;
   }
