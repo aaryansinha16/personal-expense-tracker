@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' hide Category;
 
 import '../db/database.dart';
 import '../db/models.dart';
+import '../services/daily_budget.dart';
 import '../services/monthly_setup.dart';
 
 class AppState extends ChangeNotifier {
@@ -13,6 +14,7 @@ class AppState extends ChangeNotifier {
   List<Budget> budgets = [];
   List<PendingSms> pendingSms = [];
   MonthlySetup setup = MonthlySetup(monthlyIncome: 0, savingsTarget: 0, recurring: []);
+  DailyBudget? dailyBudget;
 
   Map<String, double> monthTotals = {'debit': 0, 'credit': 0};
   DateTime selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
@@ -36,6 +38,15 @@ class AppState extends ChangeNotifier {
     setup = await _setupSvc.load();
     final (from, to) = monthRange(selectedMonth);
     monthTotals = await _db.totalsByType(from, to);
+
+    // Daily budget is always anchored to the real current month, not
+    // whatever month is selected for browsing analytics.
+    final now = DateTime.now();
+    final curStart = DateTime(now.year, now.month, 1);
+    final curEnd = DateTime(now.year, now.month + 1, 1).subtract(const Duration(milliseconds: 1));
+    final monthDebits = await _db.listTxns(from: curStart, to: curEnd, type: TxnType.debit);
+    dailyBudget = DailyBudgetCalc.fromMonth(setup: setup, monthDebits: monthDebits);
+
     notifyListeners();
   }
 
