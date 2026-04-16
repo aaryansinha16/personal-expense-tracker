@@ -6,6 +6,9 @@ import '../sms/sms_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/txn_tile.dart';
 import 'add_txn_screen.dart';
+import 'analytics_screen.dart';
+import 'review_screen.dart';
+import 'settings_screen.dart';
 import 'transactions_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -72,25 +75,43 @@ class _HomeScreenState extends State<HomeScreen> {
     final screens = [
       _Dashboard(onScan: _scanInbox, scanning: _scanning),
       const TransactionsScreen(),
+      const AnalyticsScreen(),
+      const ReviewScreen(),
+      const SettingsScreen(),
     ];
+    final state = context.watch<AppState>();
+    final pendingCount = state.pendingSms.length;
 
     return Scaffold(
       body: IndexedStack(index: _tab, children: screens),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => const AddTxnScreen(),
-          ));
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('Add'),
-      ),
+      floatingActionButton: _tab == 0 || _tab == 1
+          ? FloatingActionButton.extended(
+              onPressed: () {
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const AddTxnScreen(),
+                ));
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('Add'),
+            )
+          : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.list_alt_outlined), selectedIcon: Icon(Icons.list_alt), label: 'Txns'),
+        destinations: [
+          const NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
+          const NavigationDestination(icon: Icon(Icons.list_alt_outlined), selectedIcon: Icon(Icons.list_alt), label: 'Txns'),
+          const NavigationDestination(icon: Icon(Icons.bar_chart_outlined), selectedIcon: Icon(Icons.bar_chart), label: 'Insights'),
+          NavigationDestination(
+            icon: Badge.count(
+              count: pendingCount,
+              isLabelVisible: pendingCount > 0,
+              child: const Icon(Icons.inbox_outlined),
+            ),
+            selectedIcon: const Icon(Icons.inbox),
+            label: 'Review',
+          ),
+          const NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
     );
