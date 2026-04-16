@@ -28,10 +28,18 @@ class FloatingNav extends StatelessWidget {
 
   /// Total vertical footprint this nav eats — lets screens pad ListViews
   /// so the last item clears both the nav and the system bar.
+  ///
+  /// Measured breakdown on a 3-button device:
+  ///   _NavButton content: icon(22) + gap(2) + label(~14) + vertical padding(20) = 58
+  ///   container padding (symmetric vertical 6): 12
+  ///   build()-level bottom padding: bottomInset + 8 when inset > 0, else 12
+  ///   build()-level top padding: 0
+  /// Totals to ~70 + inset + 8 = inset + 78 on 3-button; on gesture-nav it's
+  /// 70 + 12 = 82. We add ~20 more so the content never touches the nav.
   static double reservedHeight(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewPadding.bottom;
-    // nav content ~60 + vertical padding 12 + extra gap from system bar
-    return 60 + 12 + bottomInset;
+    if (bottomInset > 0) return bottomInset + 98; // 3-button / rounded gesture bar
+    return 102; // gesture-nav devices with no reserved inset
   }
 
   @override

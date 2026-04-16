@@ -28,16 +28,28 @@ class EmailParser {
     final plainBody = _stripHtml(body);
     final searchText = '$subject\n$plainBody';
 
-    // Skip obvious noise.
+    // Obvious noise we never parse.
     if (_otpRe.hasMatch(searchText)) return null;
-    if (_unsubscribeOnlyRe.hasMatch(searchText) && !_amountRe.hasMatch(searchText)) return null;
-    // Order-confirmation emails often precede payment — accept them only if
-    // they explicitly include a paid/charged verb.
     if (_shippedOnlyRe.hasMatch(subject) && !_paidVerbRe.hasMatch(searchText)) return null;
 
-    // Amount — take the LARGEST monetary value in the body. Receipts usually
-    // have several numbers (item totals, taxes, shipping, discounts, grand
-    // total). Largest tends to be the grand total.
+    // HARD REQUIREMENT: there must be a transactional signal anywhere in
+    // the text. A bare amount is not enough — promotional emails include
+    // amounts without being transactions, and we'd falsely import them.
+    final hasPaid = _paidVerbRe.hasMatch(searchText);
+    final hasCredit = _creditRe.hasMatch(searchText);
+    final hasStrongVerb = _strongTxnVerbRe.hasMatch(searchText);
+    if (!hasPaid && !hasCredit && !hasStrongVerb) return null;
+
+    // Promo filter: marketing footer + no STRONG verb → skip. Weak verbs
+    // alone (e.g. "payment options" / "your account") aren't enough to
+    // override marketing indicators.
+    final hasUnsubscribe = _unsubscribeRe.hasMatch(searchText);
+    final hasMarketingWords = _marketingHintRe.hasMatch(searchText);
+    if ((hasUnsubscribe || hasMarketingWords) && !hasStrongVerb) return null;
+
+    // Amount — take the LARGEST monetary value. Receipts usually have several
+    // numbers (items, taxes, shipping, discounts, grand total); the largest
+    // tends to be the grand total.
     double? amount;
     for (final m in _amountRe.allMatches(searchText)) {
       final raw = m.group(1)!.replaceAll(',', '');
@@ -47,9 +59,12 @@ class EmailParser {
     }
     if (amount == null) return null;
 
-    final type = _creditRe.hasMatch(searchText) && !_paidVerbRe.hasMatch(searchText)
-        ? TxnType.credit
-        : TxnType.debit;
+    // Unrealistically large amounts (₹1,00,000+) must have a VERY strong
+    // signal. Guards against marketing copy that quotes historical or
+    // comparative figures.
+    if (amount >= 100000 && !_strongTxnVerbRe.hasMatch(searchText)) return null;
+
+    final type = hasCredit && !hasPaid ? TxnType.credit : TxnType.debit;
 
     final senderDomain = _extractDomain(sender);
     final senderRule = SenderRules.match(senderDomain);
@@ -58,8 +73,7 @@ class EmailParser {
     final refNo = _refRe.firstMatch(searchText)?.group(1);
     final orderId = _orderRe.firstMatch(searchText)?.group(1);
 
-    // Sanity check — emails with tiny amounts are usually subscription expiry
-    // warnings, OTP receipts, etc. If merchant is unknown AND amount < 50, skip.
+    // Sanity check — unknown-sender + tiny amount: almost always noise.
     if (senderRule == null && amount < 50) return null;
 
     return ParsedEmail(
@@ -72,33 +86,38 @@ class EmailParser {
     );
   }
 
-  /// Quick pre-filter used by the Gmail scanner to skip obviously irrelevant
-  /// threads without paying the cost of full parsing.
+  /// Quick pre-filter used by the Gmail scanner.
   static bool looksFinancial(String subject, String body) {
     final combined = '$subject\n${_stripHtml(body)}';
     if (_otpRe.hasMatch(combined)) return false;
     if (!_amountRe.hasMatch(combined)) return false;
-    return _paidVerbRe.hasMatch(combined) || _creditRe.hasMatch(combined) ||
-        _orderRe.hasMatch(combined);
+    return _paidVerbRe.hasMatch(combined) || _creditRe.hasMatch(combined);
   }
 
   // --- Patterns ---
 
-  // Amount: "Rs.1,234.56" / "INR 1234" / "₹500.00" / "Rs 500".
   static final _amountRe = RegExp(
     r'(?:rs\.?|inr|₹)\s*([0-9][0-9,]*(?:\.\d{1,2})?)',
     caseSensitive: false,
   );
 
-  // Explicit paid/charged wording.
+  /// Any indication that money changed hands. Broad.
   static final _paidVerbRe = RegExp(
-    r'\b(paid|payment\s+(?:successful|received|made|of|confirmation)|charged|debited|you\s+spent|you\s+bought|order\s+placed|purchase(?:d)?|successfully\s+paid)\b',
+    r'\b(paid|payment\s+(?:successful|received|made|of|confirmation)|charged|debited|you\s+spent|you\s+bought|order\s+placed|purchase(?:d)?|successfully\s+paid|has\s+been\s+(?:paid|charged|debited))\b',
     caseSensitive: false,
   );
 
-  // Inbound money wording.
+  /// Inbound money wording.
   static final _creditRe = RegExp(
-    r'\b(refund(?:ed)?|credited|money\s+received|cashback|you\s+received)\b',
+    r'\b(refund(?:ed)?|credited|money\s+received|cashback|you\s+received|has\s+been\s+(?:refunded|credited))\b',
+    caseSensitive: false,
+  );
+
+  /// Strong transactional signals — used to overrule promo filters and to
+  /// authorize large amounts. Must be a phrase that *cannot* appear in a
+  /// promotional email.
+  static final _strongTxnVerbRe = RegExp(
+    r'(payment\s+successful|payment\s+confirmation|payment\s+received|order\s+confirmation|successfully\s+paid|has\s+been\s+(?:paid|debited|credited|charged|refunded)|thank\s+you\s+for\s+(?:your\s+)?(?:order|payment|purchase)|transaction\s+successful|invoice\s+for\s+your\s+order|receipt\s+for|booking\s+confirmed)',
     caseSensitive: false,
   );
 
@@ -107,19 +126,20 @@ class EmailParser {
     caseSensitive: false,
   );
 
-  // Subscribe/marketing footer only — skip if no amount.
-  static final _unsubscribeOnlyRe = RegExp(
-    r'\bunsubscribe\b',
+  static final _unsubscribeRe = RegExp(r'\bunsubscribe\b', caseSensitive: false);
+
+  /// Words that strongly suggest marketing/promotional content. When present
+  /// we require a strong transactional verb to accept the email.
+  static final _marketingHintRe = RegExp(
+    r'\b(deals?|offer|discount|sale|save\s+up\s+to|flat\s+\d+%|upto\s+\d+%|limited\s+time|flash\s+sale|best\s+price|explore\s+(?:now|deals)|starts?\s+(?:at|from)|book\s+now|shop\s+now|browse\s+our|newsletter|promotional)\b',
     caseSensitive: false,
   );
 
-  // "Shipped" emails without a paid verb — defer to payment email.
   static final _shippedOnlyRe = RegExp(
     r'\b(shipped|out\s+for\s+delivery|delivered)\b',
     caseSensitive: false,
   );
 
-  // Order ID / reference number.
   static final _refRe = RegExp(
     r'(?:ref(?:erence)?(?:\s*no\.?)?|utr|txn(?:\s*id)?|transaction\s*id)\s*[:\-#]?\s*([A-Za-z0-9]{6,})',
     caseSensitive: false,
@@ -133,12 +153,10 @@ class EmailParser {
 
   static String _stripHtml(String s) {
     if (!s.contains('<')) return s;
-    // Kill script/style blocks then all tags.
     var out = s
         .replaceAll(RegExp(r'<script[^>]*>.*?</script>', dotAll: true, caseSensitive: false), ' ')
         .replaceAll(RegExp(r'<style[^>]*>.*?</style>', dotAll: true, caseSensitive: false), ' ')
         .replaceAll(RegExp(r'<[^>]+>'), ' ');
-    // Decode the most common HTML entities.
     const entities = {
       '&nbsp;': ' ',
       '&amp;': '&',
@@ -152,7 +170,6 @@ class EmailParser {
       '&#8377;': '₹',
     };
     entities.forEach((k, v) => out = out.replaceAll(k, v));
-    // Collapse whitespace.
     out = out.replaceAll(RegExp(r'\s+'), ' ').trim();
     return out;
   }
@@ -166,8 +183,6 @@ class EmailParser {
   }
 
   static String? _merchantFromSubject(String subject) {
-    // "Your Swiggy order ...", "Amazon.in order confirmation" — pick the
-    // capitalized noun phrase at the start.
     final m = RegExp(r'^[Yy]our\s+([A-Za-z][A-Za-z0-9\.\-]+)').firstMatch(subject);
     if (m != null) return m.group(1);
     final m2 = RegExp(r'^([A-Z][A-Za-z0-9\.]+)').firstMatch(subject.trim());

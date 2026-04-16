@@ -99,6 +99,75 @@ void main() {
       expect(r!.type, 'credit');
       expect(r.amount, 1599);
     });
+
+    test('rejects redBus promo with embedded amount', () {
+      // Real case: historical reference inside promotional copy.
+      final r = EmailParser.parse(
+        'promo@redbus.in',
+        'Traveller, book your tickets on the redBus app!',
+        '''
+        Explore amazing deals on bus and train tickets.
+        Starting at ₹99 only. Save up to ₹500 on your first booking!
+        Amount - of 500000 (equivalent to 71.3 million or US\$18,000 in 2019).
+        Book now. Unsubscribe from promotional emails.
+        ''',
+      );
+      expect(r, isNull);
+    });
+
+    test('rejects Amazon deal newsletter', () {
+      final r = EmailParser.parse(
+        'deals@amazon.in',
+        'Deal of the day: Noise smartwatch',
+        '''
+        Best price. Flat 40% off. Grab it before it's gone.
+        ₹1,999 now ₹999. Shop now. Unsubscribe.
+        ''',
+      );
+      expect(r, isNull);
+    });
+
+    test('rejects promotional email without a transaction verb', () {
+      final r = EmailParser.parse(
+        'offers@swiggy.in',
+        'Exclusive offer for you',
+        'Get ₹200 off on orders above ₹499. Limited time offer. Unsubscribe.',
+      );
+      expect(r, isNull);
+    });
+
+    test('large amount requires strong transaction verb', () {
+      // Amount ≥ ₹1,00,000 with only weak "paid" verb should be rejected —
+      // belt-and-braces against marketing copy.
+      final r = EmailParser.parse(
+        'noreply@somesite.com',
+        'Update',
+        'You paid ₹5,00,000 for the apartment in Mumbai in 2019.',
+      );
+      expect(r, isNull);
+    });
+
+    test('large amount accepted with strong signal', () {
+      final r = EmailParser.parse(
+        'noreply@hdfcbank.com',
+        'Payment confirmation',
+        'Payment successful. Your payment of ₹2,00,000 has been debited to your account.',
+      );
+      expect(r, isNotNull);
+      expect(r!.amount, 200000);
+      expect(r.type, 'debit');
+    });
+
+    test('rejects email with amount but no transaction verb', () {
+      // A non-promo email that just mentions an amount shouldn't become
+      // a transaction.
+      final r = EmailParser.parse(
+        'friend@somedomain.com',
+        'Hey, question',
+        'Do you remember when that thing cost ₹5,000? Good times.',
+      );
+      expect(r, isNull);
+    });
   });
 
   group('EmailParser.looksFinancial', () {
