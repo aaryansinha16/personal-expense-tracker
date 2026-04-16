@@ -128,5 +128,80 @@ void main() {
       );
       expect(TransactionDeduper.pickDuplicate(candidate, [existing]), isNull);
     });
+
+    test('CC-bill-pair: bank debit + CC-credit merchant → duplicate', () {
+      final base = DateTime(2026, 4, 13, 12);
+      final bankDebit = _mk(
+        id: 1,
+        amount: 15000,
+        date: base,
+        type: TxnType.debit,
+        source: TxnSource.sms,
+        merchant: 'cred@axis',
+      );
+      final ccCredit = _mk(
+        amount: 15000,
+        date: base.add(const Duration(minutes: 3)),
+        type: TxnType.credit,
+        source: TxnSource.sms,
+        merchant: 'HDFC Card',
+      );
+      expect(
+        TransactionDeduper.pickDuplicate(ccCredit, [bankDebit]),
+        isNotNull,
+      );
+    });
+
+    test('CC-bill-pair: plain credit (not to a card) → not duplicate', () {
+      // Someone actually sent you ₹500 — salary, refund from a person, etc.
+      // Same day, same amount as a prior debit, different types. Should NOT
+      // be classified as a CC pair because the merchant isn't a card.
+      final base = DateTime(2026, 4, 13, 12);
+      final debit = _mk(
+        id: 1,
+        amount: 500,
+        date: base,
+        type: TxnType.debit,
+        source: TxnSource.sms,
+        merchant: 'Swiggy',
+      );
+      final credit = _mk(
+        amount: 500,
+        date: base.add(const Duration(hours: 2)),
+        type: TxnType.credit,
+        source: TxnSource.sms,
+        merchant: 'Salary ACME Inc',
+      );
+      expect(
+        TransactionDeduper.pickDuplicate(credit, [debit]),
+        isNull,
+      );
+    });
+
+    test('same merchant + same day across types stays separate '
+        'unless CC pair', () {
+      // Catches a regression: same merchant + different type shouldn't
+      // dedupe as same-merchant rule (that's same-type only).
+      final base = DateTime(2026, 4, 13, 12);
+      final debit = _mk(
+        id: 1,
+        amount: 500,
+        date: base,
+        type: TxnType.debit,
+        source: TxnSource.sms,
+        merchant: 'Swiggy',
+      );
+      final credit = _mk(
+        amount: 500,
+        date: base,
+        type: TxnType.credit,
+        source: TxnSource.sms,
+        merchant: 'Swiggy',
+      );
+      expect(
+        TransactionDeduper.pickDuplicate(credit, [debit]),
+        isNull,
+      );
+    });
   });
 }

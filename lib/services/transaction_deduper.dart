@@ -43,18 +43,41 @@ class TransactionDeduper {
         a.account != null && b.account != null && a.account == b.account;
     final merchantMatch = _merchantMatches(a.merchant, b.merchant);
 
+    // CC-bill-pair: one side is a bank debit, the other a CC credit. Same
+    // amount, same day, different types, and one is tagged as a card
+    // payment (via merchant or sms-parser flag encoded in note). Collapse
+    // the pair by treating the credit as a duplicate of the debit.
+    if (!sameType) {
+      final debit = a.type == TxnType.debit ? a : b;
+      final credit = a.type == TxnType.credit ? a : b;
+      if (_looksLikeCardPayment(credit) && debit.amount == credit.amount) {
+        return true;
+      }
+      return false;
+    }
+
     // Strong: same account + same amount + same day.
     if (accountMatch) return true;
 
     // Strong: same merchant + same amount + same day + same type.
-    if (merchantMatch && sameType) return true;
+    if (merchantMatch) return true;
 
     // Cross-source heuristic: different sources, same amount + day + type,
     // amount above a coincidence threshold.
-    if (!sameType) return false;
     if (a.source != b.source && b.amount >= 100) return true;
 
     return false;
+  }
+
+  static bool _looksLikeCardPayment(Txn t) {
+    final m = t.merchant?.toLowerCase() ?? '';
+    final n = t.note?.toLowerCase() ?? '';
+    if (n.contains('card-payment') || n.contains('card payment')) return true;
+    if (m.contains('credit card') || m.contains('card payment')) return true;
+    // Merchant is often a card issuer display name when isCardPayment was
+    // set in the parser.
+    const cardIssuers = ['hdfc card', 'sbi card', 'icici card', 'axis card', 'amex', 'onecard', 'cred'];
+    return cardIssuers.any(m.contains);
   }
 
   static bool _sameCalendarDay(DateTime x, DateTime y) =>

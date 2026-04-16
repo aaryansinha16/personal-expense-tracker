@@ -76,15 +76,19 @@ class SmsParser {
   );
 
   // "Payment received on your credit card" — the other side of a bill pay.
-  // These should NOT be recorded as income; they're internal transfers.
-  // The BODY alone is enough: HDFC's combined HDFCBK alerts channel does
-  // credit-card alerts too, so sender-gating misses those.
+  // Body-based so we match regardless of sender token. Kept liberal because
+  // under-matching here causes double-counted bill payments in monthly
+  // totals, while over-matching just routes a few rare real credits away
+  // from income — a much cheaper mistake.
   static final _cardPaymentBodyRe = RegExp(
-    r'(credited\s+to\s+your.*credit\s+card'
-    r'|payment\s+of.*(?:received\s+on|towards)\s+your.*credit\s+card'
-    r'|thank\s+you\s+for\s+(?:your\s+)?payment.*credit\s+card'
-    r'|your.*credit\s+card.*payment.*(?:received|credited|successful)'
-    r'|bill\s+payment\s+(?:received|credited)\s+to\s+your\s+card)',
+    r'(credited\s+to\s+your.*(?:credit\s+card|cc\b)'
+    r'|has\s+been\s+credited\s+to\s+your.*(?:credit\s+card|cc\b)'
+    r'|payment\s+of.*(?:received\s+on|towards|credited\s+to)\s+your.*(?:credit\s+card|cc\b)'
+    r'|(?:payment|amount).*credited\s+(?:to|towards)\s+your.*(?:credit\s+card|cc\b)'
+    r'|thank\s+you\s+for\s+(?:your\s+)?payment.*(?:credit\s+card|cc\b)'
+    r'|your.*(?:credit\s+card|cc\b).*payment.*(?:received|credited|successful)'
+    r'|bill\s+(?:payment\s+)?(?:received|credited|paid).*(?:credit\s+card|cc\b|your\s+card)'
+    r'|we\s+have\s+received.*payment.*(?:credit\s+card|cc\b))',
     caseSensitive: false,
   );
 
