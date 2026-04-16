@@ -5,13 +5,132 @@ import '../providers/app_state.dart';
 import '../sms/sms_service.dart';
 import '../utils/formatters.dart';
 import '../widgets/bubble_card.dart';
+import '../widgets/daily_budget_card.dart';
 import '../widgets/floating_nav.dart';
 import '../widgets/txn_tile.dart';
+import '../services/daily_budget.dart';
 import 'add_txn_screen.dart';
 import 'analytics_screen.dart';
+import 'budget_setup_screen.dart';
 import 'review_screen.dart';
 import 'settings_screen.dart';
 import 'transactions_screen.dart';
+
+Future<void> _showRedistributeSheet(BuildContext context, DailyBudget b) async {
+  final scheme = Theme.of(context).colorScheme;
+  final over = b.spentToday - b.todayAllowed;
+  await showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    builder: (ctx) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(22, 18, 22, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade400,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Icon(Icons.auto_graph_rounded, color: scheme.primary),
+                const SizedBox(width: 10),
+                const Text('Adjust future days',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'You\'ve spent ${inr(b.spentToday)} today, ${inr(over)} over your '
+              '${inr(b.todayAllowed)} daily limit.',
+              style: TextStyle(fontSize: 13.5, color: scheme.onSurface.withOpacity(0.75), height: 1.4),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: scheme.primary.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Spreading the overspend across the remaining '
+                    '${b.daysLeftExclusive} day${b.daysLeftExclusive == 1 ? '' : 's'}:',
+                    style: TextStyle(fontSize: 12.5, color: scheme.onSurface.withOpacity(0.7)),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Was', style: TextStyle(fontSize: 11)),
+                            Text(inr(b.todayAllowed),
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_rounded),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Now', style: TextStyle(fontSize: 11, color: scheme.primary)),
+                            Text(
+                              inr(b.projectedFutureDailyAllowance),
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: scheme.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'The app recalculates your daily limit automatically every time you refresh — '
+              'no saved override is needed.',
+              style: TextStyle(fontSize: 12, color: scheme.onSurface.withOpacity(0.55), height: 1.4),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 4),
+                      child: Text('Got it'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -148,6 +267,16 @@ class _Dashboard extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 180),
           children: [
+            if (state.dailyBudget != null) ...[
+              DailyBudgetCard(
+                budget: state.dailyBudget!,
+                onTapSetup: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const BudgetSetupScreen(),
+                )),
+                onRedistribute: () => _showRedistributeSheet(context, state.dailyBudget!),
+              ),
+              const SizedBox(height: 14),
+            ],
             _MonthCard(month: state.selectedMonth, spent: spent, earned: earned, balance: balance),
             const SizedBox(height: 22),
             SectionHeader(
