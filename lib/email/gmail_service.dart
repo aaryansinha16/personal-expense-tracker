@@ -6,18 +6,23 @@ import 'package:googleapis/gmail/v1.dart' as gmail;
 
 import '../db/database.dart';
 import '../db/models.dart';
+import '../services/transaction_deduper.dart';
 import 'parser.dart';
 import 'sender_registry.dart';
 
 class GmailImportResult {
   final int scanned;
   final int imported;
+  final int queued;
+  final int deduped;
   final int skipped;
   final String? error;
   const GmailImportResult({
     required this.scanned,
     required this.imported,
     required this.skipped,
+    this.queued = 0,
+    this.deduped = 0,
     this.error,
   });
 }
@@ -73,6 +78,8 @@ class GmailService {
       final msgs = list.messages ?? const [];
 
       int imported = 0;
+      int queued = 0;
+      int deduped = 0;
       int skipped = 0;
       final db = AppDb.instance;
 
@@ -85,11 +92,23 @@ class GmailService {
         }
 
         final full = await api.users.messages.get('me', id, format: 'full');
-        final parsed = _parseFull(full);
+        final headers = full.payload?.headers ?? const [];
+        String sender = '';
+        String subject = '';
+        for (final h in headers) {
+          final name = (h.name ?? '').toLowerCase();
+          if (name == 'from') {
+            sender = h.value ?? '';
+          } else if (name == 'subject') {
+            subject = h.value ?? '';
+          }
+        }
+        final body = _extractBody(full.payload);
+        final parsed = EmailParser.parse(sender, subject, body);
 
         if (parsed != null) {
           final categoryId = await _categoryFor(db, parsed.categoryHint);
-          await db.insertTxn(Txn(
+          final candidate = Txn(
             amount: parsed.amount,
             type: parsed.type,
             categoryId: categoryId,
@@ -97,8 +116,26 @@ class GmailService {
             date: _messageDate(full),
             source: TxnSource.email,
             note: parsed.orderId != null ? 'order:${parsed.orderId}' : null,
+          );
+          final dup = await TransactionDeduper.findDuplicate(candidate);
+          if (dup != null) {
+            deduped++;
+          } else {
+            await db.insertTxn(candidate);
+            imported++;
+          }
+        } else if (_shouldQueueForReview(sender, subject, body)) {
+          // Known-sender email that failed parsing — queue with a reason so
+          // the user can triage instead of losing it silently.
+          await db.insertPendingEmail(PendingEmail(
+            messageId: id,
+            sender: sender,
+            subject: subject.isEmpty ? null : subject,
+            body: body,
+            receivedAt: _messageDate(full),
+            reason: _rejectReason(sender, subject, body),
           ));
-          imported++;
+          queued++;
         } else {
           skipped++;
         }
@@ -108,6 +145,8 @@ class GmailService {
       return GmailImportResult(
         scanned: msgs.length,
         imported: imported,
+        queued: queued,
+        deduped: deduped,
         skipped: skipped,
       );
     } catch (e) {
@@ -133,17 +172,47 @@ class GmailService {
     return DateTime.now();
   }
 
-  ParsedEmail? _parseFull(gmail.Message full) {
-    final headers = full.payload?.headers ?? const [];
-    String sender = '';
-    String subject = '';
-    for (final h in headers) {
-      final name = (h.name ?? '').toLowerCase();
-      if (name == 'from') sender = h.value ?? '';
-      else if (name == 'subject') subject = h.value ?? '';
+  /// Decide whether a rejected email is worth surfacing to the user vs
+  /// dropping silently. We queue when the sender is a known merchant /
+  /// bank and the body contains a currency amount (i.e. it COULD have been
+  /// a transaction) so the user can triage Axis-like cases.
+  bool _shouldQueueForReview(String sender, String subject, String body) {
+    final domain = _extractDomain(sender);
+    final knownSender = SenderRegistry.instance.match(domain) != null;
+    if (!knownSender) return false;
+    // Must at least contain a rupee amount to be worth queueing.
+    return RegExp(r'(?:rs\.?|inr|₹)\s*[0-9]', caseSensitive: false)
+        .hasMatch('$subject\n$body');
+  }
+
+  String _rejectReason(String sender, String subject, String body) {
+    final search = '$subject\n$body'.toLowerCase();
+    if (RegExp(r'\botp\b|verification\s*code').hasMatch(search)) {
+      return 'looks like an OTP';
     }
-    final body = _extractBody(full.payload);
-    return EmailParser.parse(sender, subject, body);
+    if (search.contains('unsubscribe') ||
+        RegExp(r'\b(offer|deal|discount|sale|flat\s+\d+%)\b').hasMatch(search)) {
+      return 'promotional content';
+    }
+    if (RegExp(r'\b(shipped|out\s+for\s+delivery|delivered)\b').hasMatch(search)) {
+      return 'delivery update';
+    }
+    if (RegExp(r'\b(upcoming|will\s+be\s+debited|scheduled)\b').hasMatch(search)) {
+      return 'upcoming payment notice';
+    }
+    if (!RegExp(r'\b(paid|payment|debited|credited|refund|purchase|charged)\b')
+        .hasMatch(search)) {
+      return 'no transaction verb';
+    }
+    return 'parser rejected';
+  }
+
+  String _extractDomain(String sender) {
+    final m = RegExp(r'<([^>]+@([^>]+))>').firstMatch(sender);
+    if (m != null) return m.group(2)!.trim().toLowerCase();
+    final m2 = RegExp(r'([A-Za-z0-9._%+\-]+)@([A-Za-z0-9.\-]+)').firstMatch(sender);
+    if (m2 != null) return m2.group(2)!.trim().toLowerCase();
+    return sender.toLowerCase();
   }
 
   String _extractBody(gmail.MessagePart? part) {

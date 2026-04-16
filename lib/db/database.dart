@@ -16,7 +16,7 @@ class AppDb {
     final path = p.join(dir, 'expense_tracker.db');
     _db = await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -32,6 +32,9 @@ class AppDb {
     }
     if (oldVersion < 4) {
       await db.execute(_emailSendersSchema);
+    }
+    if (oldVersion < 5) {
+      await db.execute(_pendingEmailsSchema);
     }
   }
 
@@ -62,6 +65,18 @@ class AppDb {
       category_hint TEXT,
       is_default INTEGER NOT NULL DEFAULT 0,
       enabled INTEGER NOT NULL DEFAULT 1
+    )
+  ''';
+
+  static const _pendingEmailsSchema = '''
+    CREATE TABLE pending_emails (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id TEXT UNIQUE,
+      sender TEXT NOT NULL,
+      subject TEXT,
+      body TEXT NOT NULL,
+      received_at INTEGER NOT NULL,
+      reason TEXT
     )
   ''';
 
@@ -124,6 +139,7 @@ class AppDb {
     await db.execute(_recurringExpensesSchema);
     await db.execute(_processedEmailsSchema);
     await db.execute(_emailSendersSchema);
+    await db.execute(_pendingEmailsSchema);
 
     await _seedCategories(db);
   }
@@ -274,6 +290,7 @@ class AppDb {
     final d = await db;
     return await d.transaction((txn) async {
       final processedDel = await txn.delete('processed_emails');
+      final pendingDel = await txn.delete('pending_emails');
       int txnsDel = 0;
       if (deleteEmailTxns) {
         txnsDel = await txn.delete('transactions', where: 'source = ?', whereArgs: [TxnSource.email]);
@@ -281,6 +298,7 @@ class AppDb {
       return EmailResetResult(
         processedDeleted: processedDel,
         emailTxnsDeleted: txnsDel,
+        pendingDeleted: pendingDel,
       );
     });
   }
@@ -365,6 +383,24 @@ class AppDb {
   Future<int> deleteRecurringExpense(int id) async =>
       (await db).delete('recurring_expenses', where: 'id=?', whereArgs: [id]);
 
+  // Pending emails (Review queue for email imports)
+  Future<int> insertPendingEmail(PendingEmail e) async {
+    final d = await db;
+    return d.insert('pending_emails', e.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<List<PendingEmail>> listPendingEmails() async {
+    final rows = await (await db).query('pending_emails', orderBy: 'received_at DESC');
+    return rows.map(PendingEmail.fromMap).toList();
+  }
+
+  Future<int> deletePendingEmail(int id) async =>
+      (await db).delete('pending_emails', where: 'id=?', whereArgs: [id]);
+
+  Future<int> clearPendingEmails() async =>
+      (await db).delete('pending_emails');
+
   // Email senders
   Future<List<Map<String, Object?>>> listEmailSenders() async {
     final d = await db;
@@ -444,8 +480,10 @@ class SmsResetResult {
 class EmailResetResult {
   final int processedDeleted;
   final int emailTxnsDeleted;
+  final int pendingDeleted;
   EmailResetResult({
     required this.processedDeleted,
     required this.emailTxnsDeleted,
+    this.pendingDeleted = 0,
   });
 }

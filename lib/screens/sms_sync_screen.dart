@@ -39,7 +39,8 @@ class _SmsSyncScreenState extends State<SmsSyncScreen> {
         setState(() {
           _busy = false;
           _lastStatus =
-              'Scanned ${res.scanned} · imported ${res.imported} · queued ${res.queued}';
+              'Scanned ${res.scanned} · imported ${res.imported} · '
+                  'queued ${res.queued} · deduped ${res.deduped}';
         });
       }
     } catch (e) {

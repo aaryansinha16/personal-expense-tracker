@@ -58,7 +58,8 @@ class _EmailSyncScreenState extends State<EmailSyncScreen> {
           _busy = false;
           _status = res.error != null
               ? 'Error: ${res.error}'
-              : 'Scanned ${res.scanned} · imported ${res.imported} · skipped ${res.skipped}';
+              : 'Scanned ${res.scanned} · imported ${res.imported} · '
+                  'review ${res.queued} · deduped ${res.deduped} · skipped ${res.skipped}';
         });
       }
     } catch (e) {

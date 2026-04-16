@@ -32,6 +32,14 @@ class EmailParser {
     if (_otpRe.hasMatch(searchText)) return null;
     if (_shippedOnlyRe.hasMatch(subject) && !_paidVerbRe.hasMatch(searchText)) return null;
 
+    // Future-payment notices: "upcoming e-mandate", "will be debited",
+    // "scheduled auto-payment", etc. Not transactions, just reminders.
+    // Allow only if the email also confirms the payment happened (strong
+    // past-tense verb).
+    final hasUpcoming = _upcomingPaymentRe.hasMatch(searchText);
+    final hasStrongPastTense = _strongTxnVerbRe.hasMatch(searchText);
+    if (hasUpcoming && !hasStrongPastTense) return null;
+
     // HARD REQUIREMENT: there must be a transactional signal anywhere in
     // the text. A bare amount is not enough — promotional emails include
     // amounts without being transactions, and we'd falsely import them.
@@ -137,6 +145,15 @@ class EmailParser {
 
   static final _shippedOnlyRe = RegExp(
     r'\b(shipped|out\s+for\s+delivery|delivered)\b',
+    caseSensitive: false,
+  );
+
+  /// Future-dated payment notices: e-mandate previews, scheduled debits,
+  /// due-date reminders. If a matching email ALSO has a strong past-tense
+  /// verb (e.g. "has been successfully paid") we accept — that's the
+  /// confirmation email for a scheduled payment that just ran.
+  static final _upcomingPaymentRe = RegExp(
+    r'(upcoming\s+e-?mandate|upcoming\s+(?:auto-?)?payment|will\s+be\s+(?:debited|charged)|scheduled\s+(?:debit|payment|auto-?payment)|reminder.*(?:payment|debit|due)|payment\s+due\s+on)',
     caseSensitive: false,
   );
 

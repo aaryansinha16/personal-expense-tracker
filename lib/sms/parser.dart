@@ -77,12 +77,18 @@ class SmsParser {
 
   // "Payment received on your credit card" — the other side of a bill pay.
   // These should NOT be recorded as income; they're internal transfers.
-  static final _cardPaymentReceivedRe = RegExp(
-    r'(?:payment\s+(?:received|of|credited)|thank\s+you\s+for\s+(?:your\s+)?payment|bill\s+payment\s+received)',
+  // The BODY alone is enough: HDFC's combined HDFCBK alerts channel does
+  // credit-card alerts too, so sender-gating misses those.
+  static final _cardPaymentBodyRe = RegExp(
+    r'(credited\s+to\s+your.*credit\s+card'
+    r'|payment\s+of.*(?:received\s+on|towards)\s+your.*credit\s+card'
+    r'|thank\s+you\s+for\s+(?:your\s+)?payment.*credit\s+card'
+    r'|your.*credit\s+card.*payment.*(?:received|credited|successful)'
+    r'|bill\s+payment\s+(?:received|credited)\s+to\s+your\s+card)',
     caseSensitive: false,
   );
 
-  // Sender tokens that imply a credit-card account (as opposed to a bank account).
+  // Sender tokens that imply a credit-card account — kept as a soft hint.
   static final _cardSenderTokens = <String>[
     'HDFCCC', 'HDFCCARD', 'SBICRD', 'SBICARD', 'ICICIC',
     'AXISCC', 'AXISCRD', 'AMEX', 'ONECARD', 'CRED',
@@ -143,7 +149,7 @@ class SmsParser {
 
     // Bill-due SMS — it's a future obligation, not a transaction. The CC issuer
     // credit/debit verbs often appear in these so we short-circuit early.
-    if (_billDueRe.hasMatch(body) && !_debitRe.hasMatch(body) && !_cardPaymentReceivedRe.hasMatch(body)) {
+    if (_billDueRe.hasMatch(body) && !_debitRe.hasMatch(body) && !_cardPaymentBodyRe.hasMatch(body)) {
       return ParsedSms(
         amount: amount,
         type: TxnType.debit,
@@ -157,19 +163,25 @@ class SmsParser {
     final isDebit = _debitRe.hasMatch(body);
     final isCredit = _creditRe.hasMatch(body);
 
-    // CC-payment-received detection: if the sender is a card issuer and the
-    // body contains the payment-received signal, flag this as an internal
-    // transfer so it doesn't count as income. We still emit the txn so the
-    // user can see it and decide.
-    final isCardPayment = _isCardSender(sender) && _cardPaymentReceivedRe.hasMatch(body);
+    // CC-payment-received detection — the other side of a bank debit when
+    // you pay a credit-card bill. Body-based so HDFC's combined HDFCBK
+    // alerts channel (which doesn't look like a card sender) still matches.
+    // For sender-only matches we narrow further so a normal card purchase
+    // ("Rs.500 spent on your HDFC CC") doesn't get misclassified: require
+    // the credit verb AND absence of debit/spend verbs.
+    final isCardPaymentConfirmed = _cardPaymentBodyRe.hasMatch(body) ||
+        (_isCardSender(sender) &&
+            _creditRe.hasMatch(body) &&
+            !_debitRe.hasMatch(body));
 
     // If it's a balance-only message and neither debit/credit is explicit, skip.
     if (!isDebit && !isCredit && _balanceOnlyRe.hasMatch(body)) return null;
     if (!isDebit && !isCredit) return null;
 
-    // Card-payment-received is structurally a credit on the card account, but
-    // we categorize as a transfer so totals don't double-count.
-    final type = isCardPayment
+    // Card-payment-received is structurally a credit on the card account;
+    // we mark it so SmsService can drop it as a duplicate of the bank-side
+    // debit. Regular card purchases flow through as real debits.
+    final type = isCardPaymentConfirmed
         ? TxnType.credit
         : (isDebit && !isCredit
             ? TxnType.debit
@@ -187,10 +199,12 @@ class SmsParser {
     return ParsedSms(
       amount: amount,
       type: type,
-      merchant: isCardPayment ? (merchant ?? _guessBillMerchant(sender, body) ?? 'Card payment') : merchant,
+      merchant: isCardPaymentConfirmed
+          ? (merchant ?? _guessBillMerchant(sender, body) ?? 'Card payment')
+          : merchant,
       account: account,
       refNo: ref,
-      isCardPayment: isCardPayment,
+      isCardPayment: isCardPaymentConfirmed,
     );
   }
 
