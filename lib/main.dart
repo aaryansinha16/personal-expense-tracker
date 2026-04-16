@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'providers/app_state.dart';
 import 'screens/home_screen.dart';
@@ -41,6 +42,11 @@ class _ExpenseAppState extends State<ExpenseApp> {
       await _share.start();
       await NotificationsService.instance.init();
       await BackgroundSync.instance.initialize();
+      // If the user had auto-resume-sync enabled, re-apply it so the
+      // lifecycle observer starts firing.
+      final prefs = await SharedPreferences.getInstance();
+      final on = prefs.getBool('pref_bg_gmail_sync') ?? false;
+      await BackgroundSync.instance.setEnabled(on);
     });
   }
 
