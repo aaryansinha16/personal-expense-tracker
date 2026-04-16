@@ -5,6 +5,7 @@ class TxnType {
 
 class TxnSource {
   static const sms = 'sms';
+  static const email = 'email';
   static const manual = 'manual';
 }
 
