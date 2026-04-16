@@ -16,11 +16,30 @@ class AppDb {
     final path = p.join(dir, 'expense_tracker.db');
     _db = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
     return _db!;
   }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute(_recurringExpensesSchema);
+    }
+  }
+
+  static const _recurringExpensesSchema = '''
+    CREATE TABLE recurring_expenses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      amount REAL NOT NULL,
+      category_id INTEGER,
+      day_of_month INTEGER NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      FOREIGN KEY(category_id) REFERENCES categories(id)
+    )
+  ''';
 
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
@@ -78,6 +97,7 @@ class AppDb {
         processed_at INTEGER NOT NULL
       )
     ''');
+    await db.execute(_recurringExpensesSchema);
 
     await _seedCategories(db);
   }
@@ -246,4 +266,24 @@ class AppDb {
       [from.millisecondsSinceEpoch, to.millisecondsSinceEpoch, type],
     );
   }
+
+  // Recurring expenses
+  Future<List<RecurringExpense>> listRecurringExpenses({bool onlyActive = false}) async {
+    final d = await db;
+    final rows = await d.query(
+      'recurring_expenses',
+      where: onlyActive ? 'active = 1' : null,
+      orderBy: 'day_of_month ASC',
+    );
+    return rows.map(RecurringExpense.fromMap).toList();
+  }
+
+  Future<int> upsertRecurringExpense(RecurringExpense r) async {
+    final d = await db;
+    if (r.id == null) return d.insert('recurring_expenses', r.toMap());
+    return d.update('recurring_expenses', r.toMap(), where: 'id=?', whereArgs: [r.id]);
+  }
+
+  Future<int> deleteRecurringExpense(int id) async =>
+      (await db).delete('recurring_expenses', where: 'id=?', whereArgs: [id]);
 }

@@ -5,6 +5,7 @@ import '../db/models.dart';
 import '../providers/app_state.dart';
 import '../utils/formatters.dart';
 import '../widgets/bubble_card.dart';
+import 'budget_setup_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -19,6 +20,34 @@ class SettingsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 180),
         children: [
+          const SectionHeader(title: 'MONTHLY BUDGET'),
+          BubbleCard(
+            padding: EdgeInsets.zero,
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const BudgetSetupScreen(),
+            )),
+            child: ListTile(
+              leading: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(Icons.account_balance_wallet_rounded, color: Theme.of(context).colorScheme.primary),
+              ),
+              title: const Text('Income, savings & fixed expenses',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(
+                state.setup.isConfigured
+                    ? '${inr(state.setup.monthlyDiscretionary)} available this month'
+                    : 'Not set up yet',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+            ),
+          ),
+          const SizedBox(height: 20),
           const SectionHeader(title: 'CATEGORIES'),
           BubbleCard(
             padding: const EdgeInsets.symmetric(vertical: 4),
