@@ -1,5 +1,5 @@
 import '../db/models.dart';
-import 'sender_rules.dart';
+import 'sender_registry.dart';
 
 class ParsedEmail {
   final double amount;
@@ -67,9 +67,9 @@ class EmailParser {
     final type = hasCredit && !hasPaid ? TxnType.credit : TxnType.debit;
 
     final senderDomain = _extractDomain(sender);
-    final senderRule = SenderRules.match(senderDomain);
+    final senderRule = SenderRegistry.instance.match(senderDomain);
     final merchant = senderRule?.displayName ?? _merchantFromSubject(subject) ?? senderDomain;
-    final categoryHint = senderRule?.category;
+    final categoryHint = senderRule?.categoryHint;
     final refNo = _refRe.firstMatch(searchText)?.group(1);
     final orderId = _orderRe.firstMatch(searchText)?.group(1);
 

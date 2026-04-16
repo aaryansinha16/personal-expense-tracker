@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' hide Category;
 
 import '../db/database.dart';
 import '../db/models.dart';
+import '../email/sender_registry.dart';
 import '../services/daily_budget.dart';
 import '../services/insights.dart';
 import '../services/monthly_setup.dart';
@@ -26,6 +27,7 @@ class AppState extends ChangeNotifier {
   Future<void> init() async {
     loading = true;
     notifyListeners();
+    await SenderRegistry.instance.load();
     await _setupSvc.autoPostDueRecurring();
     await refreshAll();
     loading = false;

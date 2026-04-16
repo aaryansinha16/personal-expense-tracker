@@ -7,7 +7,7 @@ import 'package:googleapis/gmail/v1.dart' as gmail;
 import '../db/database.dart';
 import '../db/models.dart';
 import 'parser.dart';
-import 'sender_rules.dart';
+import 'sender_registry.dart';
 
 class GmailImportResult {
   final int scanned;
@@ -118,7 +118,7 @@ class GmailService {
   }
 
   String _buildQuery(DateTime? since) {
-    final base = SenderRules.gmailQuery();
+    final base = SenderRegistry.instance.gmailQuery();
     if (since == null) return base;
     final ts = (since.millisecondsSinceEpoch ~/ 1000);
     return '$base after:$ts';
