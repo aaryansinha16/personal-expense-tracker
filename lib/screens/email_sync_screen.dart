@@ -80,10 +80,20 @@ class _EmailSyncScreenState extends State<EmailSyncScreen> {
   Future<void> _aiScan(DateTime since) async {
     setState(() {
       _status = 'Fetching emails…';
-      _progress = null;
+      _progress = 0;
       _errorDetail = null;
     });
-    final items = await _gmail.fetchRawForAi(since: since);
+    final items = await _gmail.fetchRawForAi(
+      since: since,
+      onProgress: (fetched, total) {
+        if (mounted) {
+          setState(() {
+            _status = 'Fetching $fetched / $total';
+            _progress = total == 0 ? null : fetched / total;
+          });
+        }
+      },
+    );
     if (!mounted) return;
 
     final estInr = AiPipeline.estimateInrRounded(smsCount: 0, emailCount: items.length);

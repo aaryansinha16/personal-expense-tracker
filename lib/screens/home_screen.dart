@@ -180,22 +180,14 @@ class _HomeScreenState extends State<HomeScreen> {
       extendBody: true,
       body: IndexedStack(index: _tab, children: screens),
       floatingActionButton: _tab == 0 || _tab == 1
-          ? Padding(
-              // Sit the FAB just above the floating nav. reservedHeight is
-              // the whole nav-plus-gap; we only need to clear the nav's own
-              // height (~70) so the FAB nearly touches it.
-              padding: EdgeInsets.only(
-                bottom: FloatingNav.reservedHeight(context) - 70,
-              ),
-              child: FloatingActionButton.extended(
-                onPressed: () {
-                  Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => const AddTxnScreen(),
-                  ));
-                },
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('Add'),
-              ),
+          ? FloatingActionButton.extended(
+              onPressed: () {
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const AddTxnScreen(),
+                ));
+              },
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Add'),
             )
           : null,
       bottomNavigationBar: FloatingNav(

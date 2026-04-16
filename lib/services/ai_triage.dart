@@ -121,15 +121,36 @@ class AiTriageService {
     await prefs.setInt(_kItemsTriaged, await getItemsTriaged() + items);
   }
 
-  Future<bool> testConnection() async {
+  /// Returns null on success, or a human-readable error string.
+  Future<String?> testConnection() async {
     try {
       final res = await _callApi([
         _message(role: 'user', text: 'Reply with the single word OK.'),
       ]);
-      return (res['content'] as List?)?.isNotEmpty ?? false;
-    } catch (_) {
-      return false;
+      final hasContent = (res['content'] as List?)?.isNotEmpty ?? false;
+      if (!hasContent) return 'Empty response from Claude.';
+      return null;
+    } on ClaudeApiException catch (e) {
+      return e.toString();
+    } catch (e) {
+      return e.toString();
     }
+  }
+
+  /// Diagnostic info the user can see to verify the saved key matches the
+  /// one they pasted. Returns a map of: {length, prefix, suffix, model}.
+  Future<Map<String, String>> keyDebugInfo() async {
+    final key = await getApiKey();
+    final model = await getModel();
+    if (key == null) {
+      return {'length': '0', 'prefix': '(none)', 'suffix': '(none)', 'model': model};
+    }
+    return {
+      'length': key.length.toString(),
+      'prefix': key.length >= 8 ? key.substring(0, 8) : key,
+      'suffix': key.length >= 4 ? key.substring(key.length - 4) : key,
+      'model': model,
+    };
   }
 
   /// Classify a batch of queue items. Sends one request with all items

@@ -75,8 +75,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
       _status = null;
     });
     try {
-      final ok = await AiTriageService.instance.testConnection();
-      setState(() => _status = ok ? 'Connection OK' : 'Connection failed');
+      final err = await AiTriageService.instance.testConnection();
+      setState(() => _status = err == null ? 'Connection OK' : 'Failed — $err');
     } catch (e) {
       setState(() => _status = 'Error: $e');
     } finally {
@@ -186,6 +186,34 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                 _row('Accumulated cost', '\$${_cumUsd.toStringAsFixed(4)}'),
               ],
             ),
+          ),
+          const SizedBox(height: 20),
+          const SectionHeader(title: 'DIAGNOSTICS'),
+          FutureBuilder<Map<String, String>>(
+            future: AiTriageService.instance.keyDebugInfo(),
+            builder: (ctx, snap) {
+              final d = snap.data ?? const {};
+              return BubbleCard(
+                child: Column(
+                  children: [
+                    _row('Saved key length', d['length'] ?? '…'),
+                    const SizedBox(height: 6),
+                    _row('Starts with', d['prefix'] ?? '…'),
+                    const SizedBox(height: 6),
+                    _row('Ends with', d['suffix'] ?? '…'),
+                    const SizedBox(height: 6),
+                    _row('Model', d['model'] ?? '…'),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Compare these to your key in the Anthropic console. '
+                      'Clipboard paste often adds a stray whitespace.',
+                      style: TextStyle(
+                          color: scheme.onSurface.withOpacity(0.55), fontSize: 11.5),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
           const SizedBox(height: 20),
           Text(
