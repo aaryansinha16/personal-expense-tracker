@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 
 import 'providers/app_state.dart';
 import 'screens/home_screen.dart';
+import 'services/background_sync.dart';
+import 'services/notifications.dart';
 import 'services/share_receiver.dart';
 import 'theme/app_theme.dart';
 
@@ -35,7 +37,11 @@ class _ExpenseAppState extends State<ExpenseApp> {
   void initState() {
     super.initState();
     _share = ShareReceiver(appNavigatorKey);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _share.start());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _share.start();
+      await NotificationsService.instance.init();
+      await BackgroundSync.instance.initialize();
+    });
   }
 
   @override

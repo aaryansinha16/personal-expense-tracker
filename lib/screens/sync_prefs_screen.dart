@@ -1,0 +1,152 @@
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../services/background_sync.dart';
+import '../services/notifications.dart';
+import '../widgets/bubble_card.dart';
+
+class SyncPrefsScreen extends StatefulWidget {
+  const SyncPrefsScreen({super.key});
+
+  @override
+  State<SyncPrefsScreen> createState() => _SyncPrefsScreenState();
+}
+
+class _SyncPrefsScreenState extends State<SyncPrefsScreen> {
+  static const _kBgGmail = 'pref_bg_gmail_sync';
+  static const _kNotifyTxn = 'pref_notify_txn';
+  static const _kNotifyBudget = 'pref_notify_budget';
+
+  bool _bgGmail = false;
+  bool _notifyTxn = true;
+  bool _notifyBudget = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _bgGmail = prefs.getBool(_kBgGmail) ?? false;
+      _notifyTxn = prefs.getBool(_kNotifyTxn) ?? true;
+      _notifyBudget = prefs.getBool(_kNotifyBudget) ?? true;
+    });
+  }
+
+  Future<void> _setBool(String key, bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, v);
+  }
+
+  Future<void> _toggleBgSync(bool v) async {
+    setState(() => _bgGmail = v);
+    await _setBool(_kBgGmail, v);
+    if (v) {
+      await BackgroundSync.instance.enablePeriodicSync();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Background sync enabled. Android runs it every 15–30 min.',
+            ),
+          ),
+        );
+      }
+    } else {
+      await BackgroundSync.instance.disable();
+    }
+  }
+
+  Future<void> _testNotification() async {
+    await NotificationsService.instance.init();
+    await NotificationsService.instance.showTransactionAlert(
+      title: 'Expense Tracker',
+      body: 'Notifications are working.',
+      id: 99,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Sync & notifications')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          const SectionHeader(title: 'BACKGROUND SYNC'),
+          BubbleCard(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Auto-scan Gmail in the background',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    'Runs every 15–30 min (Android clamps the minimum). '
+                    'Each scan looks at the last 2 hours of mail.',
+                    style: TextStyle(color: scheme.onSurface.withOpacity(0.6), fontSize: 12.5),
+                  ),
+                  value: _bgGmail,
+                  onChanged: _toggleBgSync,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'SMS is already auto-detected when the app is running. There is no reliable way for a Flutter app to receive SMS in the background on modern Android — keep the app open for live SMS pickup, or scan from Settings → SMS sync after you receive new messages.',
+            style: TextStyle(fontSize: 11.5, color: scheme.onSurface.withOpacity(0.55), height: 1.45),
+          ),
+          const SizedBox(height: 20),
+          const SectionHeader(title: 'NOTIFICATIONS'),
+          BubbleCard(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('New transactions',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    'Notify when background sync imports a new expense.',
+                    style: TextStyle(color: scheme.onSurface.withOpacity(0.6), fontSize: 12.5),
+                  ),
+                  value: _notifyTxn,
+                  onChanged: (v) {
+                    setState(() => _notifyTxn = v);
+                    _setBool(_kNotifyTxn, v);
+                  },
+                ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Daily budget alerts',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    'Warn when today\'s spend crosses your daily allowance.',
+                    style: TextStyle(color: scheme.onSurface.withOpacity(0.6), fontSize: 12.5),
+                  ),
+                  value: _notifyBudget,
+                  onChanged: (v) {
+                    setState(() => _notifyBudget = v);
+                    _setBool(_kNotifyBudget, v);
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.notifications_rounded),
+            label: const Text('Send a test notification'),
+            onPressed: _testNotification,
+          ),
+        ],
+      ),
+    );
+  }
+}

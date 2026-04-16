@@ -12,6 +12,7 @@ import 'email_senders_screen.dart';
 import 'email_sync_screen.dart';
 import 'import_email_screen.dart';
 import 'sms_sync_screen.dart';
+import 'sync_prefs_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -151,6 +152,33 @@ class SettingsScreen extends StatelessWidget {
                   style: TextStyle(fontWeight: FontWeight.w600)),
               subtitle: Text(
                 'See + edit the merchant allowlist used by Gmail sync',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const SectionHeader(title: 'SYNC & NOTIFICATIONS'),
+          BubbleCard(
+            padding: EdgeInsets.zero,
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const SyncPrefsScreen(),
+            )),
+            child: ListTile(
+              leading: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(Icons.notifications_active_rounded,
+                    color: Theme.of(context).colorScheme.primary),
+              ),
+              title: const Text('Background sync & alerts',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(
+                'Auto-scan Gmail every 15 min, push notifications',
                 style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
               ),
               trailing: const Icon(Icons.chevron_right_rounded),

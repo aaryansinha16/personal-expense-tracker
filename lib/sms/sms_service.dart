@@ -4,6 +4,7 @@ import 'package:another_telephony/telephony.dart';
 
 import '../db/database.dart';
 import '../db/models.dart';
+import '../services/notifications.dart';
 import '../services/transaction_deduper.dart';
 import 'parser.dart';
 
@@ -149,7 +150,17 @@ class SmsService {
             account: parsed.account,
           );
           final dup = await TransactionDeduper.findDuplicate(candidate);
-          if (dup == null) await db.insertTxn(candidate);
+          if (dup == null) {
+            await db.insertTxn(candidate);
+            // Best-effort notification. Failure is silent so the import
+            // still succeeds if notifications aren't granted yet.
+            try {
+              await NotificationsService.instance.showTransactionAlert(
+                title: '₹${parsed.amount.toStringAsFixed(0)} ${parsed.type == TxnType.debit ? 'spent' : 'received'}',
+                body: parsed.merchant ?? 'New transaction from SMS',
+              );
+            } catch (_) {}
+          }
         }
         await db.markSmsProcessed(hash);
         onNewTxn();
