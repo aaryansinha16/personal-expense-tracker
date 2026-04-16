@@ -4,14 +4,68 @@ import 'package:provider/provider.dart';
 import '../db/models.dart';
 import '../email/parser.dart' as email_parser;
 import '../providers/app_state.dart';
+import '../services/ai_triage.dart';
 import '../sms/parser.dart';
 import '../utils/formatters.dart';
 import '../widgets/bubble_card.dart';
 import '../widgets/floating_nav.dart';
 import 'add_txn_screen.dart';
+import 'ai_settings_screen.dart';
 
-class ReviewScreen extends StatelessWidget {
+class ReviewScreen extends StatefulWidget {
   const ReviewScreen({super.key});
+
+  @override
+  State<ReviewScreen> createState() => _ReviewScreenState();
+}
+
+class _ReviewScreenState extends State<ReviewScreen> {
+  bool _triaging = false;
+  String? _triageStatus;
+
+  Future<void> _runTriage(BuildContext context, AppState state) async {
+    final hasKey = await AiTriageService.instance.getApiKey() != null;
+    if (!hasKey) {
+      if (!context.mounted) return;
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Add your Anthropic API key'),
+          content: const Text(
+            'AI triage sends each pending item to Claude for classification. '
+            'You need to add your own API key first.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Not now')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Open settings')),
+          ],
+        ),
+      );
+      if (go == true && context.mounted) {
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => const AiSettingsScreen(),
+        ));
+      }
+      return;
+    }
+    setState(() {
+      _triaging = true;
+      _triageStatus = null;
+    });
+    try {
+      final res = await state.aiTriageAll();
+      if (mounted) {
+        setState(() {
+          _triageStatus = 'Imported ${res.imported} · dismissed ${res.dismissed} · '
+              'kept ${res.kept} · \$${res.usdCost.toStringAsFixed(4)}';
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _triageStatus = 'AI triage failed: $e');
+    } finally {
+      if (mounted) setState(() => _triaging = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -20,7 +74,24 @@ class ReviewScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      appBar: AppBar(title: const Text('Review')),
+      appBar: AppBar(
+        title: const Text('Review'),
+        actions: [
+          if (total > 0)
+            IconButton(
+              tooltip: 'AI triage all',
+              onPressed: _triaging ? null : () => _runTriage(context, state),
+              icon: _triaging
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.auto_awesome_rounded),
+            ),
+          const SizedBox(width: 8),
+        ],
+      ),
       body: total == 0
           ? _emptyState(context)
           : ListView(
@@ -31,6 +102,23 @@ class ReviewScreen extends StatelessWidget {
                 FloatingNav.reservedHeight(context) + 24,
               ),
               children: [
+                if (_triageStatus != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: BubbleCard(
+                      padding: const EdgeInsets.all(12),
+                      color: Theme.of(context).colorScheme.primary.withOpacity(0.08),
+                      child: Row(
+                        children: [
+                          Icon(Icons.auto_awesome_rounded,
+                              size: 18,
+                              color: Theme.of(context).colorScheme.primary),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(_triageStatus!, style: const TextStyle(fontSize: 12.5))),
+                        ],
+                      ),
+                    ),
+                  ),
                 if (state.pendingSms.isNotEmpty) ...[
                   SectionHeader(title: 'SMS · ${state.pendingSms.length}'),
                   for (final s in state.pendingSms) ...[
