@@ -1,0 +1,141 @@
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:expense_tracker/email/parser.dart';
+import 'package:expense_tracker/email/sender_rules.dart';
+
+void main() {
+  group('EmailParser.parse', () {
+    test('parses Amazon order confirmation with largest-amount heuristic', () {
+      final r = EmailParser.parse(
+        'Amazon.in <auto-confirm@amazon.in>',
+        'Your Amazon.in order of Noise Smartwatch has been placed',
+        '''
+        <html><body>
+          <p>Thank you for your order.</p>
+          <p>Item total: ₹1,899.00</p>
+          <p>Shipping: ₹0.00</p>
+          <p>GST: ₹189.00</p>
+          <p>Order total: ₹2,088.00</p>
+          <p>Order ID: 407-1234567-1234567</p>
+        </body></html>
+        ''',
+      );
+      expect(r, isNotNull);
+      expect(r!.amount, 2088);
+      expect(r.type, 'debit');
+      expect(r.merchant, 'Amazon');
+      expect(r.categoryHint, 'Shopping');
+      expect(r.orderId, '407-1234567-1234567');
+    });
+
+    test('parses Swiggy plain text receipt', () {
+      final r = EmailParser.parse(
+        'orders@swiggy.in',
+        'Swiggy Order Confirmation',
+        'Your Swiggy order has been placed. You paid Rs.485 for your order from Meghana Foods.',
+      );
+      expect(r, isNotNull);
+      expect(r!.amount, 485);
+      expect(r.merchant, 'Swiggy');
+      expect(r.categoryHint, 'Food & Dining');
+    });
+
+    test('CRED payment email parses as Transfer', () {
+      final r = EmailParser.parse(
+        'noreply@cred.club',
+        'Payment successful',
+        'Your payment of ₹12,500 to HDFC Credit Card was successful.',
+      );
+      expect(r, isNotNull);
+      expect(r!.amount, 12500);
+      expect(r.merchant, 'CRED');
+      expect(r.categoryHint, 'Transfer');
+    });
+
+    test('ignores OTP emails', () {
+      final r = EmailParser.parse(
+        'no-reply@somebank.in',
+        'Your OTP is 345678',
+        'Your OTP for login is 345678. Amount: Rs.500. Do not share.',
+      );
+      expect(r, isNull);
+    });
+
+    test('ignores shipped-only notification without paid verb', () {
+      final r = EmailParser.parse(
+        'ship-confirm@amazon.in',
+        'Your Amazon.in order has shipped',
+        'Your order has shipped. Track your package.',
+      );
+      expect(r, isNull);
+    });
+
+    test('skips unknown sender for sub-₹50 amounts', () {
+      final r = EmailParser.parse(
+        'random@unknown.co',
+        'Your subscription',
+        'You paid Rs.5 for convenience fee.',
+      );
+      expect(r, isNull);
+    });
+
+    test('accepts unknown sender when amount is substantial', () {
+      final r = EmailParser.parse(
+        'noreply@somemerchant.co.in',
+        'Payment receipt',
+        'Payment of ₹899 received. Thank you for your purchase.',
+      );
+      expect(r, isNotNull);
+      expect(r!.amount, 899);
+    });
+
+    test('detects refund as credit', () {
+      final r = EmailParser.parse(
+        'refunds@amazon.in',
+        'Your refund has been processed',
+        'We have refunded ₹1,599 to your original payment method.',
+      );
+      expect(r, isNotNull);
+      expect(r!.type, 'credit');
+      expect(r.amount, 1599);
+    });
+  });
+
+  group('EmailParser.looksFinancial', () {
+    test('true for a Swiggy receipt', () {
+      expect(
+        EmailParser.looksFinancial('Your Swiggy order', 'You paid ₹485 for your meal'),
+        true,
+      );
+    });
+    test('false for delivery updates', () {
+      expect(
+        EmailParser.looksFinancial('Your package has shipped', 'Track your package here.'),
+        false,
+      );
+    });
+    test('false for OTP emails', () {
+      expect(
+        EmailParser.looksFinancial('Your OTP', 'OTP is 123456 for ₹500 transaction'),
+        false,
+      );
+    });
+  });
+
+  group('SenderRules', () {
+    test('matches by domain suffix', () {
+      expect(SenderRules.match('orders@swiggy.in'.split('@').last)?.displayName, 'Swiggy');
+      expect(SenderRules.match('auto-confirm@amazon.in'.split('@').last)?.displayName, 'Amazon');
+      expect(SenderRules.match('ship.amazon.in')?.displayName, 'Amazon');
+    });
+    test('unknown domain returns null', () {
+      expect(SenderRules.match('foo@bar.com'.split('@').last), isNull);
+    });
+    test('gmailQuery contains all senders', () {
+      final q = SenderRules.gmailQuery();
+      expect(q.contains('from:swiggy.in'), true);
+      expect(q.contains('from:amazon.in'), true);
+      expect(q.contains('-subject:otp'), true);
+    });
+  });
+}

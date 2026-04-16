@@ -16,7 +16,7 @@ class AppDb {
     final path = p.join(dir, 'expense_tracker.db');
     _db = await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -26,6 +26,9 @@ class AppDb {
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await db.execute(_recurringExpensesSchema);
+    }
+    if (oldVersion < 3) {
+      await db.execute(_processedEmailsSchema);
     }
   }
 
@@ -38,6 +41,13 @@ class AppDb {
       day_of_month INTEGER NOT NULL,
       active INTEGER NOT NULL DEFAULT 1,
       FOREIGN KEY(category_id) REFERENCES categories(id)
+    )
+  ''';
+
+  static const _processedEmailsSchema = '''
+    CREATE TABLE processed_emails (
+      message_id TEXT PRIMARY KEY,
+      processed_at INTEGER NOT NULL
     )
   ''';
 
@@ -98,6 +108,7 @@ class AppDb {
       )
     ''');
     await db.execute(_recurringExpensesSchema);
+    await db.execute(_processedEmailsSchema);
 
     await _seedCategories(db);
   }
@@ -228,6 +239,37 @@ class AppDb {
     );
   }
 
+  // Processed Email dedup
+  Future<bool> isEmailProcessed(String messageId) async {
+    final d = await db;
+    final rows = await d.query('processed_emails', where: 'message_id=?', whereArgs: [messageId], limit: 1);
+    return rows.isNotEmpty;
+  }
+
+  Future<void> markEmailProcessed(String messageId) async {
+    final d = await db;
+    await d.insert(
+      'processed_emails',
+      {'message_id': messageId, 'processed_at': DateTime.now().millisecondsSinceEpoch},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
+  Future<EmailResetResult> resetEmailSync({bool deleteEmailTxns = true}) async {
+    final d = await db;
+    return await d.transaction((txn) async {
+      final processedDel = await txn.delete('processed_emails');
+      int txnsDel = 0;
+      if (deleteEmailTxns) {
+        txnsDel = await txn.delete('transactions', where: 'source = ?', whereArgs: [TxnSource.email]);
+      }
+      return EmailResetResult(
+        processedDeleted: processedDel,
+        emailTxnsDeleted: txnsDel,
+      );
+    });
+  }
+
   // Aggregates
   Future<Map<String, double>> totalsByType(DateTime from, DateTime to) async {
     final d = await db;
@@ -317,5 +359,14 @@ class SmsResetResult {
     required this.processedDeleted,
     required this.smsTxnsDeleted,
     required this.pendingDeleted,
+  });
+}
+
+class EmailResetResult {
+  final int processedDeleted;
+  final int emailTxnsDeleted;
+  EmailResetResult({
+    required this.processedDeleted,
+    required this.emailTxnsDeleted,
   });
 }
