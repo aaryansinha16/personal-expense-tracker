@@ -25,7 +25,7 @@ class SmsService {
   }
 
   /// Scan inbox for historical SMS and import matching ones.
-  /// Returns count of new transactions added and SMS pushed to review queue.
+  /// [since] filters by date (inclusive).
   Future<ImportResult> scanInbox({DateTime? since}) async {
     final messages = await _telephony.getInboxSms(
       columns: [
@@ -49,13 +49,26 @@ class SmsService {
       final body = m.body ?? '';
       final ts = m.date ?? DateTime.now().millisecondsSinceEpoch;
       if (body.isEmpty) continue;
-      if (!SmsParser.isFinancialSender(sender)) continue;
+
+      final knownSender = SmsParser.isFinancialSender(sender);
+      final looksFinancial = SmsParser.looksFinancial(body);
+      // Skip clearly non-financial noise (e.g. delivery updates without amounts).
+      if (!knownSender && !looksFinancial) continue;
 
       final hash = _hashSms(sender, body, ts);
       if (await db.isSmsProcessed(hash)) continue;
 
-      final parsed = SmsParser.parse(sender, body);
-      if (parsed == null) {
+      final parsed = knownSender ? SmsParser.parse(sender, body) : null;
+
+      if (parsed != null && parsed.isCardPayment) {
+        // CC "payment received" SMS is the other side of a bank debit we
+        // already recorded. Skip entirely so the bill payment isn't counted
+        // as both expense and income.
+        await db.markSmsProcessed(hash);
+        continue;
+      }
+
+      if (parsed == null || parsed.isBillDue) {
         await db.insertPendingSms(PendingSms(
           sender: sender,
           body: body,
@@ -63,21 +76,18 @@ class SmsService {
         ));
         queued++;
       } else {
-        // Bill-due SMS: we don't record as a txn, just notify later (TODO).
-        if (!parsed.isBillDue) {
-          final categoryId = await _autoCategoryId(db, parsed.merchant, parsed.type);
-          await db.insertTxn(Txn(
-            amount: parsed.amount,
-            type: parsed.type,
-            categoryId: categoryId,
-            merchant: parsed.merchant,
-            date: DateTime.fromMillisecondsSinceEpoch(ts),
-            source: TxnSource.sms,
-            rawSms: jsonEncode({'sender': sender, 'body': body}),
-            account: parsed.account,
-          ));
-          imported++;
-        }
+        final categoryId = await _autoCategoryId(db, parsed.merchant, parsed.type);
+        await db.insertTxn(Txn(
+          amount: parsed.amount,
+          type: parsed.type,
+          categoryId: categoryId,
+          merchant: parsed.merchant,
+          date: DateTime.fromMillisecondsSinceEpoch(ts),
+          source: TxnSource.sms,
+          rawSms: jsonEncode({'sender': sender, 'body': body}),
+          account: parsed.account,
+        ));
+        imported++;
       }
       await db.markSmsProcessed(hash);
     }
@@ -92,21 +102,30 @@ class SmsService {
         final sender = message.address ?? '';
         final body = message.body ?? '';
         if (body.isEmpty) return;
-        if (!SmsParser.isFinancialSender(sender)) return;
+
+        final knownSender = SmsParser.isFinancialSender(sender);
+        final looksFinancial = SmsParser.looksFinancial(body);
+        if (!knownSender && !looksFinancial) return;
 
         final ts = message.date ?? DateTime.now().millisecondsSinceEpoch;
         final hash = _hashSms(sender, body, ts);
         final db = AppDb.instance;
         if (await db.isSmsProcessed(hash)) return;
 
-        final parsed = SmsParser.parse(sender, body);
-        if (parsed == null) {
+        final parsed = knownSender ? SmsParser.parse(sender, body) : null;
+
+        if (parsed != null && parsed.isCardPayment) {
+          await db.markSmsProcessed(hash);
+          return;
+        }
+
+        if (parsed == null || parsed.isBillDue) {
           await db.insertPendingSms(PendingSms(
             sender: sender,
             body: body,
             receivedAt: DateTime.fromMillisecondsSinceEpoch(ts),
           ));
-        } else if (!parsed.isBillDue) {
+        } else {
           final categoryId = await _autoCategoryId(db, parsed.merchant, parsed.type);
           await db.insertTxn(Txn(
             amount: parsed.amount,
@@ -126,7 +145,11 @@ class SmsService {
     );
   }
 
-  Future<int?> _autoCategoryId(AppDb db, String? merchant, String type) async {
+  Future<int?> _autoCategoryId(
+    AppDb db,
+    String? merchant,
+    String type,
+  ) async {
     final cats = await db.listCategories();
     if (type == TxnType.credit) {
       return cats.firstWhere(
@@ -140,7 +163,6 @@ class SmsService {
     for (final m in mm) {
       if (low.contains(m.pattern)) return m.categoryId;
     }
-    // Heuristics for common UPI merchants
     final rules = <RegExp, String>{
       RegExp(r'swiggy|zomato|dominos|mcd|kfc|pizza|eatsure'): 'Food & Dining',
       RegExp(r'bigbasket|blinkit|zepto|grofers|instamart|dmart'): 'Groceries',

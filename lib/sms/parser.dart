@@ -8,6 +8,7 @@ class ParsedSms {
   final String? refNo;
   final bool isBillDue;
   final DateTime? dueDate;
+  final bool isCardPayment;
 
   ParsedSms({
     required this.amount,
@@ -17,19 +18,30 @@ class ParsedSms {
     this.refNo,
     this.isBillDue = false,
     this.dueDate,
+    this.isCardPayment = false,
   });
 }
 
 class SmsParser {
-  // Senders we care about — Indian banks + UPI apps. The senders come through
-  // as e.g. "VM-HDFCBK", "JD-SBIUPI", "AX-PAYTM". We just look for these tokens
-  // anywhere in the sender string.
+  // Tokens we look for inside the sender ID (e.g. "VM-HDFCBK" contains "HDFC").
+  // Kept broad on purpose — false positives get surfaced in Review, not silently
+  // imported, so erring on inclusive is safer than erring on exclusive.
   static final _knownSenderTokens = <String>[
-    'HDFC', 'SBI', 'ICICI', 'AXIS', 'KOTAK', 'YESBNK', 'IDFC', 'IDBIBK',
-    'PNBSMS', 'BOB', 'INDBNK', 'CITIBK', 'CITIBK', 'RBLBNK', 'AUFBNK',
-    'PAYTM', 'PHONPE', 'PHONEPE', 'GPAY', 'GOOGLPAY', 'AMZPAY', 'BHIMPE',
-    'CRED', 'SLICE', 'FREECHG', 'MOBIKWK',
-    'HDFCCC', 'SBICRD', 'AMEX', 'ONECARD', 'HSBC', 'AMZNPAY',
+    // Banks
+    'HDFC', 'SBI', 'SBIUPI', 'SBIINB', 'ICICI', 'AXIS', 'KOTAK', 'YESBNK', 'YBLSMS',
+    'IDFC', 'IDBIBK', 'IDBI', 'PNBSMS', 'PNB', 'BOB', 'BOBTXN', 'BOBSMS',
+    'INDBNK', 'INDUSB', 'CITIBK', 'CITIB', 'RBLBNK', 'RBL', 'AUFBNK', 'AUBANK',
+    'FEDERL', 'FEDRL', 'CANBNK', 'CANARA', 'UNIONB', 'MAHB', 'JUPITER', 'AIRTEL',
+    // UPI / wallets
+    'PAYTM', 'PYTM', 'PHONPE', 'PHONEPE', 'PHPE', 'GPAY', 'GOOGLPAY', 'GOOGLE',
+    'BHIM', 'BHIMPE', 'FREECHG', 'MOBIKWK', 'MKWIK', 'JUPAY', 'SUPRMM',
+    // Cards / credit
+    'HDFCCC', 'HDFCCARD', 'SBICRD', 'SBICARD', 'ICICIC', 'AXISCC', 'AXISCRD',
+    'AMEX', 'ONECARD', 'HSBC', 'CRED', 'SLICE',
+    // Marketplaces / payment aggregators
+    'AMAZON', 'AMZN', 'ATMZN', 'ATMZNI', 'AMAZNP', 'AMZPAY', 'AMZNPAY',
+    'FLPKRT', 'FLIPKT', 'FLIPKART', 'MYNTRA',
+    'RZRPAY', 'RAZORPAY', 'PAYU',
   ];
 
   static bool isFinancialSender(String sender) {
@@ -37,7 +49,15 @@ class SmsParser {
     return _knownSenderTokens.any((t) => s.contains(t));
   }
 
-  // Amount in Indian bank SMS: "Rs.1,234.56" / "INR 1234" / "Rs 500.00".
+  /// A weaker signal than [isFinancialSender]: the SMS contains a ₹ amount
+  /// and a debit/credit verb even though we don't recognize the sender.
+  /// We surface these in Review rather than dropping them silently.
+  static bool looksFinancial(String body) {
+    if (!_amountRe.hasMatch(body)) return false;
+    return _debitRe.hasMatch(body) || _creditRe.hasMatch(body) || _billDueRe.hasMatch(body);
+  }
+
+  // Amount: "Rs.1,234.56" / "INR 1234" / "Rs 500.00".
   static final _amountRe = RegExp(
     r'(?:rs\.?|inr)\s*([0-9][0-9,]*(?:\.\d{1,2})?)',
     caseSensitive: false,
@@ -54,6 +74,23 @@ class SmsParser {
     r'\b(credited|received|deposit|credit|cr)\b',
     caseSensitive: false,
   );
+
+  // "Payment received on your credit card" — the other side of a bill pay.
+  // These should NOT be recorded as income; they're internal transfers.
+  static final _cardPaymentReceivedRe = RegExp(
+    r'(?:payment\s+(?:received|of|credited)|thank\s+you\s+for\s+(?:your\s+)?payment|bill\s+payment\s+received)',
+    caseSensitive: false,
+  );
+
+  // Sender tokens that imply a credit-card account (as opposed to a bank account).
+  static final _cardSenderTokens = <String>[
+    'HDFCCC', 'HDFCCARD', 'SBICRD', 'SBICARD', 'ICICIC',
+    'AXISCC', 'AXISCRD', 'AMEX', 'ONECARD', 'CRED',
+  ];
+  static bool _isCardSender(String sender) {
+    final s = sender.toUpperCase();
+    return _cardSenderTokens.any((t) => s.contains(t));
+  }
 
   // Merchant after "to " / "at " / "VPA " / "@"
   static final _merchantRe = RegExp(
@@ -76,7 +113,7 @@ class SmsParser {
     caseSensitive: false,
   );
 
-  // Credit card bill due — strong signals specific to statements.
+  // Credit card bill due
   static final _billDueRe = RegExp(
     r'(?:statement|amount\s+due|total\s+due|min(?:imum)?\s+(?:amount\s+)?due|outstanding\s+(?:amount|balance))',
     caseSensitive: false,
@@ -104,10 +141,9 @@ class SmsParser {
     final amount = double.tryParse(amtMatch.group(1)!.replaceAll(',', ''));
     if (amount == null || amount <= 0) return null;
 
-    // Bill due SMS — not a transaction, it's a future obligation.
-    // Don't require absence of credit/debit words: "Credit Card statement"
-    // will trip the credit regex even though it's a bill.
-    if (_billDueRe.hasMatch(body) && !_debitRe.hasMatch(body)) {
+    // Bill-due SMS — it's a future obligation, not a transaction. The CC issuer
+    // credit/debit verbs often appear in these so we short-circuit early.
+    if (_billDueRe.hasMatch(body) && !_debitRe.hasMatch(body) && !_cardPaymentReceivedRe.hasMatch(body)) {
       return ParsedSms(
         amount: amount,
         type: TxnType.debit,
@@ -121,11 +157,23 @@ class SmsParser {
     final isDebit = _debitRe.hasMatch(body);
     final isCredit = _creditRe.hasMatch(body);
 
+    // CC-payment-received detection: if the sender is a card issuer and the
+    // body contains the payment-received signal, flag this as an internal
+    // transfer so it doesn't count as income. We still emit the txn so the
+    // user can see it and decide.
+    final isCardPayment = _isCardSender(sender) && _cardPaymentReceivedRe.hasMatch(body);
+
     // If it's a balance-only message and neither debit/credit is explicit, skip.
     if (!isDebit && !isCredit && _balanceOnlyRe.hasMatch(body)) return null;
     if (!isDebit && !isCredit) return null;
 
-    final type = isDebit && !isCredit ? TxnType.debit : (isCredit && !isDebit ? TxnType.credit : (isDebit ? TxnType.debit : TxnType.credit));
+    // Card-payment-received is structurally a credit on the card account, but
+    // we categorize as a transfer so totals don't double-count.
+    final type = isCardPayment
+        ? TxnType.credit
+        : (isDebit && !isCredit
+            ? TxnType.debit
+            : (isCredit && !isDebit ? TxnType.credit : (isDebit ? TxnType.debit : TxnType.credit)));
 
     String? merchant;
     final vpa = _vpaRe.firstMatch(body);
@@ -139,9 +187,10 @@ class SmsParser {
     return ParsedSms(
       amount: amount,
       type: type,
-      merchant: merchant,
+      merchant: isCardPayment ? (merchant ?? _guessBillMerchant(sender, body) ?? 'Card payment') : merchant,
       account: account,
       refNo: ref,
+      isCardPayment: isCardPayment,
     );
   }
 
@@ -158,7 +207,7 @@ class SmsParser {
   static String? _guessBillMerchant(String sender, String body) {
     final s = sender.toUpperCase();
     if (s.contains('HDFC')) return 'HDFC Card';
-    if (s.contains('SBICRD') || s.contains('SBI')) return 'SBI Card';
+    if (s.contains('SBICRD') || s.contains('SBICARD')) return 'SBI Card';
     if (s.contains('ICICI')) return 'ICICI Card';
     if (s.contains('AXIS')) return 'Axis Card';
     if (s.contains('AMEX')) return 'Amex';
