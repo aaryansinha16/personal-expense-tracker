@@ -6,6 +6,7 @@ import '../db/database.dart';
 import '../providers/app_state.dart';
 import '../utils/formatters.dart';
 import '../widgets/bubble_card.dart';
+import '../widgets/insights_row.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -80,6 +81,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 180),
           children: [
+            if (state.insights.isNotEmpty) ...[
+              const SectionHeader(title: 'INSIGHTS'),
+              InsightsRow(insights: state.insights),
+              const SizedBox(height: 16),
+            ],
             BubbleCard(
               padding: const EdgeInsets.all(6),
               child: SegmentedButton<String>(
