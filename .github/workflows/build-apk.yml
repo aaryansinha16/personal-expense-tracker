@@ -41,7 +41,24 @@ jobs:
       - name: Test
         run: flutter test
 
+      # When RELEASE_KEYSTORE_BASE64 is configured as a repo secret, decode
+      # it into android/app/release.keystore so Gradle can sign the APK with
+      # a stable key (required for Gmail OAuth). If the secret isn't set,
+      # the release build falls back to the debug keystore (see
+      # android/app/build.gradle.kts) — share-sheet import still works.
+      - name: Decode release keystore
+        if: env.RELEASE_KEYSTORE_BASE64 != ''
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
+          echo "HAS_KEYSTORE=1" >> $GITHUB_ENV
+
       - name: Build release APK
+        env:
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: flutter build apk --release --no-tree-shake-icons
 
       - name: Upload APK artifact

@@ -1,9 +1,18 @@
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// Optional release keystore. If android/app/release.keystore exists (CI
+// decodes it from a secret, or a dev drops one in locally), sign the
+// release build with it — this gives a stable SHA-1 for Gmail OAuth.
+// Otherwise fall back to the debug keystore so the build still works.
+val releaseKeystoreFile = File(rootDir, "app/release.keystore")
+val hasReleaseKeystore = releaseKeystoreFile.exists()
 
 android {
     namespace = "com.aaryan.expense_tracker"
@@ -29,11 +38,24 @@ android {
         multiDexEnabled = true
     }
 
+    if (hasReleaseKeystore) {
+        signingConfigs {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = System.getenv("RELEASE_STORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: "upload"
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: ""
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

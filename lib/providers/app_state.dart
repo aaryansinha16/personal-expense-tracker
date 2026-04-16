@@ -84,6 +84,12 @@ class AppState extends ChangeNotifier {
     return res;
   }
 
+  Future<EmailResetResult> resetEmailSync({required bool deleteEmailTxns}) async {
+    final res = await _db.resetEmailSync(deleteEmailTxns: deleteEmailTxns);
+    await refreshAll();
+    return res;
+  }
+
   Category? categoryById(int? id) {
     if (id == null) return null;
     for (final c in categories) {
