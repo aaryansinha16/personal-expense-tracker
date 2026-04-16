@@ -26,6 +26,20 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- Share target for email text / HTML / subject. When another app
+                 (Outlook, Proton Mail, a browser, etc.) shares text to us, the
+                 app opens with the content pre-filled in the import flow. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/html"/>
+            </intent-filter>
         </activity>
         <meta-data
             android:name="flutterEmbedding"
