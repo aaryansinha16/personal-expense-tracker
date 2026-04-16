@@ -6,6 +6,7 @@ import '../providers/app_state.dart';
 import '../utils/formatters.dart';
 import '../widgets/bubble_card.dart';
 import 'budget_setup_screen.dart';
+import 'sms_sync_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -42,6 +43,32 @@ class SettingsScreen extends StatelessWidget {
                 state.setup.isConfigured
                     ? '${inr(state.setup.monthlyDiscretionary)} available this month'
                     : 'Not set up yet',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const SectionHeader(title: 'SMS SYNC'),
+          BubbleCard(
+            padding: EdgeInsets.zero,
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const SmsSyncScreen(),
+            )),
+            child: ListTile(
+              leading: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(Icons.sms_rounded, color: Theme.of(context).colorScheme.primary),
+              ),
+              title: const Text('Inbox scan & reset',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(
+                'Re-scan from a specific date or clear sync history',
                 style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
               ),
               trailing: const Icon(Icons.chevron_right_rounded),

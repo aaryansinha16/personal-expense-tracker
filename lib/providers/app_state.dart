@@ -78,6 +78,12 @@ class AppState extends ChangeNotifier {
     await refreshAll();
   }
 
+  Future<SmsResetResult> resetSmsSync({required bool deleteSmsTxns, required bool deletePending}) async {
+    final res = await _db.resetSmsSync(deleteSmsTxns: deleteSmsTxns, deletePending: deletePending);
+    await refreshAll();
+    return res;
+  }
+
   Category? categoryById(int? id) {
     if (id == null) return null;
     for (final c in categories) {

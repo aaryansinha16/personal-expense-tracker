@@ -14,6 +14,7 @@ import 'analytics_screen.dart';
 import 'budget_setup_screen.dart';
 import 'review_screen.dart';
 import 'settings_screen.dart';
+import 'sms_sync_screen.dart';
 import 'transactions_screen.dart';
 
 Future<void> _showRedistributeSheet(BuildContext context, DailyBudget b) async {
@@ -141,7 +142,6 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
-  bool _scanning = false;
 
   final _sms = SmsService();
 
@@ -158,43 +158,16 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  Future<void> _scanInbox() async {
-    if (_scanning) return;
-    setState(() => _scanning = true);
-    final ok = await _sms.requestPermissions();
-    if (!ok) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('SMS permission denied.')),
-        );
-        setState(() => _scanning = false);
-      }
-      return;
-    }
-    final since = DateTime.now().subtract(const Duration(days: 90));
-    try {
-      final res = await _sms.scanInbox(since: since);
-      if (mounted) {
-        await context.read<AppState>().refreshAll();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Scanned ${res.scanned} → ${res.imported} imported, ${res.queued} to review')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Scan failed: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _scanning = false);
-    }
+  void _openSmsSync() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => const SmsSyncScreen(),
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
     final screens = [
-      _Dashboard(onScan: _scanInbox, scanning: _scanning),
+      _Dashboard(onSms: _openSmsSync),
       const TransactionsScreen(),
       const AnalyticsScreen(),
       const ReviewScreen(),
@@ -236,9 +209,8 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 class _Dashboard extends StatelessWidget {
-  final VoidCallback onScan;
-  final bool scanning;
-  const _Dashboard({required this.onScan, required this.scanning});
+  final VoidCallback onSms;
+  const _Dashboard({required this.onSms});
 
   @override
   Widget build(BuildContext context) {
@@ -253,11 +225,9 @@ class _Dashboard extends StatelessWidget {
         title: const Text('Expenses'),
         actions: [
           IconButton(
-            tooltip: 'Scan SMS inbox',
-            onPressed: scanning ? null : onScan,
-            icon: scanning
-                ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.sms_rounded),
+            tooltip: 'SMS sync',
+            onPressed: onSms,
+            icon: const Icon(Icons.sms_rounded),
           ),
           const SizedBox(width: 8),
         ],

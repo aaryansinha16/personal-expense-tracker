@@ -267,6 +267,27 @@ class AppDb {
     );
   }
 
+  // SMS sync reset
+  Future<SmsResetResult> resetSmsSync({bool deleteSmsTxns = true, bool deletePending = true}) async {
+    final d = await db;
+    return await d.transaction((txn) async {
+      final processedDel = await txn.delete('processed_sms');
+      int txnsDel = 0;
+      if (deleteSmsTxns) {
+        txnsDel = await txn.delete('transactions', where: 'source = ?', whereArgs: [TxnSource.sms]);
+      }
+      int pendingDel = 0;
+      if (deletePending) {
+        pendingDel = await txn.delete('pending_sms');
+      }
+      return SmsResetResult(
+        processedDeleted: processedDel,
+        smsTxnsDeleted: txnsDel,
+        pendingDeleted: pendingDel,
+      );
+    });
+  }
+
   // Recurring expenses
   Future<List<RecurringExpense>> listRecurringExpenses({bool onlyActive = false}) async {
     final d = await db;
@@ -286,4 +307,15 @@ class AppDb {
 
   Future<int> deleteRecurringExpense(int id) async =>
       (await db).delete('recurring_expenses', where: 'id=?', whereArgs: [id]);
+}
+
+class SmsResetResult {
+  final int processedDeleted;
+  final int smsTxnsDeleted;
+  final int pendingDeleted;
+  SmsResetResult({
+    required this.processedDeleted,
+    required this.smsTxnsDeleted,
+    required this.pendingDeleted,
+  });
 }
