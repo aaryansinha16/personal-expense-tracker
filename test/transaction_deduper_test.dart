@@ -106,16 +106,30 @@ void main() {
       expect(TransactionDeduper.pickDuplicate(candidate, [existing]), isNull);
     });
 
-    test('small amounts with no identity info → not duplicate', () {
+    test('tiny amounts with no identity info → not duplicate', () {
       final base = DateTime(2026, 4, 13, 12);
-      final existing = _mk(id: 1, amount: 50, date: base, source: TxnSource.sms);
+      final existing = _mk(id: 1, amount: 5, date: base, source: TxnSource.sms);
       final candidate = _mk(
-        amount: 50,
+        amount: 5,
         date: base.add(const Duration(hours: 5)),
         source: TxnSource.email,
       );
-      // Below the ₹100 cross-source threshold, no account or merchant match.
+      // Below the ₹10 cross-source threshold, no account or merchant match.
       expect(TransactionDeduper.pickDuplicate(candidate, [existing]), isNull);
+    });
+
+    test('₹10 cross-source with no identity info → duplicate', () {
+      // At the threshold — should collapse. Real user case: a ₹10 UPI
+      // transaction arrives as one SMS and one merchant email, both
+      // without a usable account/merchant match.
+      final base = DateTime(2026, 4, 13, 12);
+      final existing = _mk(id: 1, amount: 10, date: base, source: TxnSource.sms);
+      final candidate = _mk(
+        amount: 10,
+        date: base.add(const Duration(minutes: 5)),
+        source: TxnSource.email,
+      );
+      expect(TransactionDeduper.pickDuplicate(candidate, [existing]), isNotNull);
     });
 
     test('different amount → not duplicate', () {

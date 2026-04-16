@@ -181,25 +181,48 @@ class AppState extends ChangeNotifier {
     int dismissed = 0;
     int kept = 0;
 
-    for (var i = 0; i < items.length; i++) {
-      if (i >= decisions.length) break;
+    // Only iterate up to the number of decisions we actually got — if the
+    // pipeline errored mid-way, items beyond this are left UNTOUCHED (no
+    // processed_sms / processed_emails marker), so they'll be re-fetched on
+    // the next sync.
+    for (var i = 0; i < decisions.length && i < items.length; i++) {
       final it = items[i];
       final d = decisions[i];
       final lowConfidence = d.confidence == 'low';
+      final txnDate = it.sourceDate ?? DateTime.now();
+
       if (lowConfidence) {
         kept++;
-        continue;
-      }
-
-      if (d.isTransaction && d.amount != null && d.amount! > 0) {
+        // For fresh pulls with a sourceId, route the item into the review
+        // queue so the user can still act on it.
+        if (it.queueId < 0 && it.sourceId != null) {
+          if (it.source == 'email') {
+            await _db.insertPendingEmail(PendingEmail(
+              messageId: it.sourceId,
+              sender: it.sender,
+              subject: it.subject,
+              body: it.body,
+              receivedAt: txnDate,
+              reason: 'AI low-confidence: ${d.reasoning ?? ''}',
+            ));
+          } else {
+            await _db.insertPendingSms(PendingSms(
+              sender: it.sender,
+              body: it.body,
+              receivedAt: txnDate,
+            ));
+          }
+        }
+      } else if (d.isTransaction && d.amount != null && d.amount! > 0) {
         final categoryId = _findCategoryId(d.category);
         final candidate = Txn(
           amount: d.amount!,
           type: d.type == 'credit' ? TxnType.credit : TxnType.debit,
           categoryId: categoryId,
           merchant: d.merchant,
-          date: DateTime.now(),
+          date: txnDate,
           source: it.source == 'sms' ? TxnSource.sms : TxnSource.email,
+          account: it.sourceAccount,
           note: d.reasoning,
         );
         final dup = await TransactionDeduper.findDuplicate(candidate);
@@ -213,11 +236,20 @@ class AppState extends ChangeNotifier {
         dismissed++;
       }
 
-      if (removeFromQueue) {
+      // Now — and only now — mark the source processed so it won't be
+      // re-fetched, and remove from the queue if it originated there.
+      if (removeFromQueue && it.queueId >= 0) {
         if (it.source == 'sms') {
           await _db.deletePendingSms(it.queueId);
         } else if (it.source == 'email') {
           await _db.deletePendingEmail(it.queueId);
+        }
+      }
+      if (it.sourceId != null) {
+        if (it.source == 'sms') {
+          await _db.markSmsProcessed(it.sourceId!);
+        } else if (it.source == 'email') {
+          await _db.markEmailProcessed(it.sourceId!);
         }
       }
     }
@@ -233,7 +265,8 @@ class AppState extends ChangeNotifier {
 
   /// AI-first sync for a single source. Fetches raw items from [fetch],
   /// runs them through the pipeline, applies decisions. Caller displays
-  /// progress via [onProgress].
+  /// progress via [onProgress]. If the pipeline returned a partial result
+  /// because of an error, the error text surfaces in [AiTriageApplyResult].
   Future<AiTriageApplyResult> runAiSync({
     required Future<List<TriageItem>> Function() fetch,
     required void Function(PipelineProgress) onProgress,
@@ -249,11 +282,19 @@ class AppState extends ChangeNotifier {
       categories: categoryNames,
       onProgress: onProgress,
     );
-    return applyAiDecisions(
+    final applied = await applyAiDecisions(
       items,
       result.decisions,
       usdSpent: result.usdSpent,
-      removeFromQueue: false, // fetch didn't pull from queue
+      removeFromQueue: false,
+    );
+    return AiTriageApplyResult(
+      imported: applied.imported,
+      dismissed: applied.dismissed,
+      kept: applied.kept,
+      usdCost: applied.usdCost,
+      error: result.error,
+      itemsUnprocessed: items.length - result.decisions.length,
     );
   }
 
@@ -325,10 +366,14 @@ class AiTriageApplyResult {
   final int dismissed;
   final int kept;
   final double usdCost;
+  final String? error;
+  final int itemsUnprocessed;
   AiTriageApplyResult({
     required this.imported,
     required this.dismissed,
     required this.kept,
     required this.usdCost,
+    this.error,
+    this.itemsUnprocessed = 0,
   });
 }

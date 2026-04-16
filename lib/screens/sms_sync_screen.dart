@@ -18,6 +18,8 @@ class _SmsSyncScreenState extends State<SmsSyncScreen> {
   final _sms = SmsService();
   bool _busy = false;
   String? _lastStatus;
+  double? _progress;
+  String? _errorDetail;
 
   Future<void> _scan(DateTime since) async {
     setState(() {
@@ -71,13 +73,18 @@ class _SmsSyncScreenState extends State<SmsSyncScreen> {
       return;
     }
 
-    setState(() => _lastStatus = 'Starting AI classification…');
+    setState(() {
+      _lastStatus = 'Starting AI classification…';
+      _progress = 0;
+      _errorDetail = null;
+    });
     final state = context.read<AppState>();
     final res = await state.runAiSync(
       fetch: () async => items,
       onProgress: (p) {
         if (mounted) {
           setState(() {
+            _progress = p.batchIndex / p.totalBatches;
             _lastStatus =
                 'Batch ${p.batchIndex}/${p.totalBatches} · '
                     '${p.itemsDone}/${p.itemsTotal} items · '
@@ -88,9 +95,18 @@ class _SmsSyncScreenState extends State<SmsSyncScreen> {
     );
     if (mounted) {
       setState(() {
-        _lastStatus =
-            'Done · ${res.imported} imported · ${res.dismissed} dismissed · '
-                '${res.kept} kept · \$${res.usdCost.toStringAsFixed(4)}';
+        _progress = null;
+        if (res.error != null) {
+          _errorDetail = res.error;
+          _lastStatus =
+              'Stopped after error. ${res.imported} imported · '
+                  '${res.dismissed} dismissed · '
+                  '${res.itemsUnprocessed} still to process.';
+        } else {
+          _lastStatus =
+              'Done · ${res.imported} imported · ${res.dismissed} dismissed · '
+                  '${res.kept} kept · \$${res.usdCost.toStringAsFixed(4)}';
+        }
       });
     }
   }
@@ -104,7 +120,9 @@ class _SmsSyncScreenState extends State<SmsSyncScreen> {
           '$count items will be sent to Claude Haiku.\n\n'
           'Estimated cost: ~\$${usd.toStringAsFixed(3)} (~₹$inr).\n\n'
           'Dedup and category assignment are handled automatically. '
-          'Low-confidence items land in Review.',
+          'Low-confidence items land in Review.\n\n'
+          'Keep the app open during the scan — if it gets backgrounded '
+          'mid-sync, the remaining items stay available for the next run.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
@@ -222,7 +240,13 @@ class _SmsSyncScreenState extends State<SmsSyncScreen> {
                 ),
                 if (_busy) ...[
                   const SizedBox(height: 12),
-                  const LinearProgressIndicator(minHeight: 3),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      minHeight: 6,
+                      value: _progress,
+                    ),
+                  ),
                 ],
                 if (_lastStatus != null) ...[
                   const SizedBox(height: 12),
@@ -233,6 +257,31 @@ class _SmsSyncScreenState extends State<SmsSyncScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(_lastStatus!, style: const TextStyle(fontSize: 12.5)),
+                  ),
+                ],
+                if (_errorDetail != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Error detail',
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.red.shade700)),
+                        const SizedBox(height: 4),
+                        SelectableText(
+                          _errorDetail!,
+                          style: const TextStyle(fontSize: 11.5, fontFamily: 'monospace'),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ],

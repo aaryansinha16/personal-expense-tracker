@@ -202,13 +202,17 @@ class GmailService {
         }
         final body = _extractBody(full.payload);
         items.add(TriageItem(
-          queueId: -1, // placeholder — not in any queue yet
+          queueId: -1,
           source: 'email',
           sender: sender,
           subject: subject.isEmpty ? null : subject,
           body: body,
+          sourceId: id,
+          sourceDate: _messageDate(full),
         ));
-        await db.markEmailProcessed(id);
+        // NOTE: do NOT mark email processed here. The caller marks it AFTER
+        // the AI decision has been applied so that failures leave items
+        // available for the next sync.
       }
       return items;
     } finally {

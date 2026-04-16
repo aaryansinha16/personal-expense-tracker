@@ -69,10 +69,26 @@ class AiTriageService {
   AiTriageService._();
 
   static const _kApiKey = 'anthropic_api_key';
+  static const _kModel = 'anthropic_model';
   static const _kCumulativeUsd = 'ai_triage_cum_usd';
   static const _kItemsTriaged = 'ai_triage_items_total';
-  static const _model = 'claude-haiku-4-20250915';
+  static const _defaultModel = 'claude-haiku-4-5';
   static const _maxTokens = 1024;
+
+  Future<String> getModel() async {
+    final prefs = await SharedPreferences.getInstance();
+    final m = prefs.getString(_kModel);
+    return (m == null || m.trim().isEmpty) ? _defaultModel : m.trim();
+  }
+
+  Future<void> setModel(String? model) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (model == null || model.trim().isEmpty) {
+      await prefs.remove(_kModel);
+    } else {
+      await prefs.setString(_kModel, model.trim());
+    }
+  }
 
   Future<String?> getApiKey() async {
     final prefs = await SharedPreferences.getInstance();
@@ -174,30 +190,24 @@ class AiTriageService {
   }
 
   List<AiDecision> _parseBatchDecisions(String text, int expectedCount) {
-    // Extract the first JSON array in the text.
     final startIdx = text.indexOf('[');
     final endIdx = text.lastIndexOf(']');
     if (startIdx < 0 || endIdx < 0 || endIdx < startIdx) {
-      return List.generate(expectedCount, (_) => _lowConf());
+      throw FormatException(
+        'Claude returned non-JSON text (${text.length} chars). '
+        'First 200 chars: ${text.substring(0, text.length > 200 ? 200 : text.length)}',
+      );
     }
     final arr = text.substring(startIdx, endIdx + 1);
-    try {
-      final decoded = jsonDecode(arr);
-      if (decoded is List) {
-        return decoded
-            .whereType<Map<String, dynamic>>()
-            .map(AiDecision.fromJson)
-            .toList();
-      }
-    } catch (_) {}
-    return List.generate(expectedCount, (_) => _lowConf());
+    final decoded = jsonDecode(arr);
+    if (decoded is! List) {
+      throw const FormatException('Claude response root was not a JSON array');
+    }
+    return decoded
+        .whereType<Map<String, dynamic>>()
+        .map(AiDecision.fromJson)
+        .toList();
   }
-
-  AiDecision _lowConf() => AiDecision(
-        isTransaction: false,
-        confidence: 'low',
-        reasoning: 'AI response could not be parsed.',
-      );
 
   Map<String, Object?> _message({required String role, required String text}) =>
       {
@@ -216,7 +226,7 @@ class AiTriageService {
       throw StateError('Anthropic API key not configured');
     }
     final body = <String, Object?>{
-      'model': _model,
+      'model': await getModel(),
       'max_tokens': _maxTokens,
       'messages': messages,
     };
@@ -241,7 +251,16 @@ class AiTriageService {
       body: jsonEncode(body),
     );
     if (res.statusCode >= 400) {
-      throw StateError('Claude API error ${res.statusCode}: ${res.body}');
+      // Try to extract the human-readable error message Anthropic returns.
+      String detail = res.body;
+      try {
+        final j = jsonDecode(res.body);
+        if (j is Map && j['error'] is Map) {
+          final err = j['error'] as Map;
+          detail = '${err['type']}: ${err['message']}';
+        }
+      } catch (_) {}
+      throw ClaudeApiException(res.statusCode, detail);
     }
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -281,12 +300,28 @@ Return ONLY the JSON array, no prose.''';
   }
 }
 
+class ClaudeApiException implements Exception {
+  final int statusCode;
+  final String detail;
+  ClaudeApiException(this.statusCode, this.detail);
+  @override
+  String toString() => 'Claude API error $statusCode: $detail';
+}
+
 class TriageItem {
   final int queueId;
   final String source; // "sms" | "email"
   final String sender;
   final String? subject;
   final String body;
+  // For fresh SMS/email pulled from inbox (not yet in the queue): the
+  // external identifier we'd mark as processed AFTER the decision is applied.
+  // For SMS: the djb2 hash of (sender|body|date). For email: Gmail message ID.
+  final String? sourceId;
+  // When this item came from a fresh pull (not the review queue), the
+  // original timestamp of the source. Used as the transaction date.
+  final DateTime? sourceDate;
+  final String? sourceAccount;
 
   TriageItem({
     required this.queueId,
@@ -294,5 +329,8 @@ class TriageItem {
     required this.sender,
     this.subject,
     required this.body,
+    this.sourceId,
+    this.sourceDate,
+    this.sourceAccount,
   });
 }
