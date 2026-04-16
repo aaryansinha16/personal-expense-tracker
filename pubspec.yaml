@@ -25,7 +25,6 @@ dependencies:
   googleapis: ^13.2.0
   extension_google_sign_in_as_googleapis_auth: ^2.0.12
   http: ^1.2.2
-  workmanager: ^0.5.2
 
 dev_dependencies:
   flutter_test:

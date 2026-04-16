@@ -64,19 +64,16 @@ class _SyncPrefsScreenState extends State<SyncPrefsScreen> {
   Future<void> _toggleBgSync(bool v) async {
     setState(() => _bgGmail = v);
     await _setBool(_kBgGmail, v);
-    if (v) {
-      await BackgroundSync.instance.enablePeriodicSync();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Background sync enabled. Android runs it every 15–30 min.',
-            ),
+    await BackgroundSync.instance.setEnabled(v);
+    if (v && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Auto-sync on. Runs a short Gmail scan whenever you open the app '
+            '(min 15 min apart).',
           ),
-        );
-      }
-    } else {
-      await BackgroundSync.instance.disable();
+        ),
+      );
     }
   }
 
@@ -134,11 +131,12 @@ class _SyncPrefsScreenState extends State<SyncPrefsScreen> {
               children: [
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Auto-scan Gmail in the background',
+                  title: const Text('Auto-scan Gmail when you open the app',
                       style: TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(
-                    'Runs every 15–30 min (Android clamps the minimum). '
-                    'Each scan looks at the last 2 hours of mail.',
+                    'Quick scan of the last 12 hours of mail whenever you '
+                    'return to the app, with a 15-minute cooldown. More '
+                    'battery-friendly than polling in the background.',
                     style: TextStyle(color: scheme.onSurface.withOpacity(0.6), fontSize: 12.5),
                   ),
                   value: _bgGmail,
