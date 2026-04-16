@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../db/models.dart';
 import '../providers/app_state.dart';
+import '../widgets/bubble_card.dart';
 
 class AddTxnScreen extends StatefulWidget {
   final Txn? edit;
@@ -57,12 +58,13 @@ class _AddTxnScreenState extends State<AddTxnScreen> {
         actions: [
           if (widget.edit != null)
             IconButton(
-              icon: const Icon(Icons.delete_outline),
+              icon: const Icon(Icons.delete_outline_rounded),
               onPressed: () async {
                 await state.deleteTxn(widget.edit!.id!);
                 if (context.mounted) Navigator.of(context).pop();
               },
             ),
+          const SizedBox(width: 8),
         ],
       ),
       body: Form(
@@ -70,19 +72,29 @@ class _AddTxnScreenState extends State<AddTxnScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: TxnType.debit, label: Text('Expense'), icon: Icon(Icons.arrow_upward)),
-                ButtonSegment(value: TxnType.credit, label: Text('Income'), icon: Icon(Icons.arrow_downward)),
-              ],
-              selected: {_type},
-              onSelectionChanged: (s) => setState(() => _type = s.first),
+            BubbleCard(
+              padding: const EdgeInsets.all(6),
+              child: SegmentedButton<String>(
+                style: SegmentedButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  side: BorderSide.none,
+                  selectedBackgroundColor: Theme.of(context).colorScheme.primary,
+                  selectedForegroundColor: Theme.of(context).colorScheme.onPrimary,
+                ),
+                segments: const [
+                  ButtonSegment(value: TxnType.debit, label: Text('Expense'), icon: Icon(Icons.arrow_upward_rounded)),
+                  ButtonSegment(value: TxnType.credit, label: Text('Income'), icon: Icon(Icons.arrow_downward_rounded)),
+                ],
+                selected: {_type},
+                onSelectionChanged: (s) => setState(() => _type = s.first),
+              ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             TextFormField(
               controller: _amount,
-              decoration: const InputDecoration(labelText: 'Amount (₹)', border: OutlineInputBorder()),
+              decoration: const InputDecoration(labelText: 'Amount (₹)', prefixIcon: Icon(Icons.currency_rupee_rounded)),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
               validator: (v) {
                 final d = double.tryParse(v ?? '');
                 if (d == null || d <= 0) return 'Enter a valid amount';
@@ -92,44 +104,48 @@ class _AddTxnScreenState extends State<AddTxnScreen> {
             const SizedBox(height: 12),
             TextFormField(
               controller: _merchant,
-              decoration: const InputDecoration(labelText: 'Merchant / description', border: OutlineInputBorder()),
+              decoration: const InputDecoration(labelText: 'Merchant / description', prefixIcon: Icon(Icons.storefront_rounded)),
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<int>(
               initialValue: _categoryId,
-              decoration: const InputDecoration(labelText: 'Category', border: OutlineInputBorder()),
+              decoration: const InputDecoration(labelText: 'Category', prefixIcon: Icon(Icons.category_rounded)),
+              borderRadius: BorderRadius.circular(18),
               items: state.categories
                   .map((c) => DropdownMenuItem<int>(value: c.id, child: Text(c.name)))
                   .toList(),
               onChanged: (v) => setState(() => _categoryId = v),
             ),
             const SizedBox(height: 12),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.calendar_today_outlined),
-              title: Text('${_date.day}/${_date.month}/${_date.year}'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () async {
-                final picked = await showDatePicker(
-                  context: context,
-                  initialDate: _date,
-                  firstDate: DateTime(2020),
-                  lastDate: DateTime.now().add(const Duration(days: 365)),
-                );
-                if (picked != null) setState(() => _date = picked);
-              },
+            BubbleCard(
+              padding: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.calendar_today_rounded),
+                title: Text('${_date.day}/${_date.month}/${_date.year}'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _date,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (picked != null) setState(() => _date = picked);
+                },
+              ),
             ),
+            const SizedBox(height: 12),
             TextFormField(
               controller: _note,
-              decoration: const InputDecoration(labelText: 'Note', border: OutlineInputBorder()),
+              decoration: const InputDecoration(labelText: 'Note', prefixIcon: Icon(Icons.notes_rounded)),
               maxLines: 2,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
             FilledButton(
               onPressed: _save,
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Text(widget.edit == null ? 'Save' : 'Update', style: const TextStyle(fontSize: 16)),
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text(widget.edit == null ? 'Save transaction' : 'Update', style: const TextStyle(fontSize: 15)),
               ),
             ),
           ],
