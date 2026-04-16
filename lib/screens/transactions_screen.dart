@@ -5,6 +5,7 @@ import '../db/database.dart';
 import '../db/models.dart';
 import '../providers/app_state.dart';
 import '../widgets/bubble_card.dart';
+import '../widgets/floating_nav.dart';
 import '../widgets/txn_tile.dart';
 import 'add_txn_screen.dart';
 
@@ -81,7 +82,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
               ),
             )
           : ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 180),
+              padding: EdgeInsets.fromLTRB(16, 8, 16, FloatingNav.reservedHeight(context) + 80),
               itemCount: _txns.length,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (_, i) => BubbleCard(

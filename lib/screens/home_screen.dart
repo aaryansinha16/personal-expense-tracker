@@ -181,7 +181,7 @@ class _HomeScreenState extends State<HomeScreen> {
       body: IndexedStack(index: _tab, children: screens),
       floatingActionButton: _tab == 0 || _tab == 1
           ? Padding(
-              padding: const EdgeInsets.only(bottom: 72),
+              padding: EdgeInsets.only(bottom: FloatingNav.reservedHeight(context)),
               child: FloatingActionButton.extended(
                 onPressed: () {
                   Navigator.of(context).push(MaterialPageRoute(
@@ -235,7 +235,7 @@ class _Dashboard extends StatelessWidget {
       body: RefreshIndicator(
         onRefresh: () => context.read<AppState>().refreshAll(),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 180),
+          padding: EdgeInsets.fromLTRB(16, 4, 16, FloatingNav.reservedHeight(context) + 80),
           children: [
             if (state.dailyBudget != null) ...[
               DailyBudgetCard(

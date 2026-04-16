@@ -6,6 +6,7 @@ import '../db/database.dart';
 import '../providers/app_state.dart';
 import '../utils/formatters.dart';
 import '../widgets/bubble_card.dart';
+import '../widgets/floating_nav.dart';
 import '../widgets/insights_row.dart';
 
 class AnalyticsScreen extends StatefulWidget {
@@ -79,7 +80,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 180),
+          padding: EdgeInsets.fromLTRB(16, 4, 16, FloatingNav.reservedHeight(context) + 24),
           children: [
             if (state.insights.isNotEmpty) ...[
               const SectionHeader(title: 'INSIGHTS'),

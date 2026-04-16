@@ -26,42 +26,51 @@ class FloatingNav extends StatelessWidget {
     required this.items,
   });
 
+  /// Total vertical footprint this nav eats — lets screens pad ListViews
+  /// so the last item clears both the nav and the system bar.
+  static double reservedHeight(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+    // nav content ~60 + vertical padding 12 + extra gap from system bar
+    return 60 + 12 + bottomInset;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isLight = theme.brightness == Brightness.light;
+    // Translate the system nav inset into padding so our floating pill
+    // sits above the 3-button system bar instead of under it.
+    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+    final bottomPad = bottomInset > 0 ? bottomInset + 8 : 12.0;
 
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-          decoration: BoxDecoration(
-            color: theme.cardTheme.color,
-            borderRadius: BorderRadius.circular(32),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(isLight ? 0.1 : 0.4),
-                blurRadius: 28,
-                offset: const Offset(0, 8),
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, bottomPad),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        decoration: BoxDecoration(
+          color: theme.cardTheme.color,
+          borderRadius: BorderRadius.circular(32),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(isLight ? 0.1 : 0.4),
+              blurRadius: 28,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            for (var i = 0; i < items.length; i++)
+              _NavButton(
+                item: items[i],
+                selected: i == selectedIndex,
+                onTap: () => onSelect(i),
+                activeColor: scheme.primary,
+                inactiveColor: scheme.onSurface.withOpacity(0.55),
               ),
-            ],
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              for (var i = 0; i < items.length; i++)
-                _NavButton(
-                  item: items[i],
-                  selected: i == selectedIndex,
-                  onTap: () => onSelect(i),
-                  activeColor: scheme.primary,
-                  inactiveColor: scheme.onSurface.withOpacity(0.55),
-                ),
-            ],
-          ),
+          ],
         ),
       ),
     );

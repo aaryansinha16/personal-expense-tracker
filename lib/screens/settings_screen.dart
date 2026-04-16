@@ -5,6 +5,7 @@ import '../db/models.dart';
 import '../providers/app_state.dart';
 import '../utils/formatters.dart';
 import '../widgets/bubble_card.dart';
+import '../widgets/floating_nav.dart';
 import 'budget_setup_screen.dart';
 import 'sms_sync_screen.dart';
 
@@ -19,7 +20,7 @@ class SettingsScreen extends StatelessWidget {
       backgroundColor: Colors.transparent,
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 180),
+        padding: EdgeInsets.fromLTRB(16, 4, 16, FloatingNav.reservedHeight(context) + 24),
         children: [
           const SectionHeader(title: 'MONTHLY BUDGET'),
           BubbleCard(
