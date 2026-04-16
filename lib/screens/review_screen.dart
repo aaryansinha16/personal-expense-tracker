@@ -5,6 +5,7 @@ import '../providers/app_state.dart';
 import '../sms/parser.dart';
 import '../utils/formatters.dart';
 import '../widgets/bubble_card.dart';
+import '../widgets/floating_nav.dart';
 import 'add_txn_screen.dart';
 
 class ReviewScreen extends StatelessWidget {
@@ -48,7 +49,7 @@ class ReviewScreen extends StatelessWidget {
               ),
             )
           : ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 180),
+              padding: EdgeInsets.fromLTRB(16, 8, 16, FloatingNav.reservedHeight(context) + 24),
               itemCount: items.length,
               separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (_, i) {
