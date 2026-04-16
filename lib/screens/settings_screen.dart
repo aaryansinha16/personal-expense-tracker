@@ -6,6 +6,7 @@ import '../providers/app_state.dart';
 import '../utils/formatters.dart';
 import '../widgets/bubble_card.dart';
 import '../widgets/floating_nav.dart';
+import 'ai_settings_screen.dart';
 import 'budget_setup_screen.dart';
 import 'email_senders_screen.dart';
 import 'email_sync_screen.dart';
@@ -150,6 +151,33 @@ class SettingsScreen extends StatelessWidget {
                   style: TextStyle(fontWeight: FontWeight.w600)),
               subtitle: Text(
                 'See + edit the merchant allowlist used by Gmail sync',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const SectionHeader(title: 'AI TRIAGE'),
+          BubbleCard(
+            padding: EdgeInsets.zero,
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const AiSettingsScreen(),
+            )),
+            child: ListTile(
+              leading: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(Icons.auto_awesome_rounded,
+                    color: Theme.of(context).colorScheme.primary),
+              ),
+              title: const Text('AI classifier',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(
+                'Use Claude to bulk-classify Review queue items',
                 style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
               ),
               trailing: const Icon(Icons.chevron_right_rounded),
