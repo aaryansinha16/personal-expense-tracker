@@ -174,7 +174,7 @@ class _HomeScreenState extends State<HomeScreen> {
       const SettingsScreen(),
     ];
     final state = context.watch<AppState>();
-    final pendingCount = state.pendingSms.length;
+    final pendingCount = state.pendingSms.length + state.pendingEmails.length;
 
     return Scaffold(
       extendBody: true,
@@ -251,9 +251,10 @@ class _Dashboard extends StatelessWidget {
             const SizedBox(height: 22),
             SectionHeader(
               title: 'RECENT',
-              trailing: state.pendingSms.isNotEmpty
+              trailing: (state.pendingSms.length + state.pendingEmails.length) > 0
                   ? PillChip(
-                      label: '${state.pendingSms.length} to review',
+                      label:
+                          '${state.pendingSms.length + state.pendingEmails.length} to review',
                       color: Colors.orange.shade700,
                       icon: Icons.fiber_manual_record,
                     )

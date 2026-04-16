@@ -172,6 +172,46 @@ class PendingSms {
       );
 }
 
+class PendingEmail {
+  final int? id;
+  final String? messageId;
+  final String sender;
+  final String? subject;
+  final String body;
+  final DateTime receivedAt;
+  final String? reason;
+
+  PendingEmail({
+    this.id,
+    this.messageId,
+    required this.sender,
+    this.subject,
+    required this.body,
+    required this.receivedAt,
+    this.reason,
+  });
+
+  Map<String, dynamic> toMap() => {
+        if (id != null) 'id': id,
+        'message_id': messageId,
+        'sender': sender,
+        'subject': subject,
+        'body': body,
+        'received_at': receivedAt.millisecondsSinceEpoch,
+        'reason': reason,
+      };
+
+  factory PendingEmail.fromMap(Map<String, dynamic> m) => PendingEmail(
+        id: m['id'] as int?,
+        messageId: m['message_id'] as String?,
+        sender: m['sender'] as String,
+        subject: m['subject'] as String?,
+        body: m['body'] as String,
+        receivedAt: DateTime.fromMillisecondsSinceEpoch(m['received_at'] as int),
+        reason: m['reason'] as String?,
+      );
+}
+
 class RecurringExpense {
   final int? id;
   final String name;

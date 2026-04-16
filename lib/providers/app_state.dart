@@ -15,6 +15,7 @@ class AppState extends ChangeNotifier {
   List<Txn> recentTxns = [];
   List<Budget> budgets = [];
   List<PendingSms> pendingSms = [];
+  List<PendingEmail> pendingEmails = [];
   MonthlySetup setup = MonthlySetup(monthlyIncome: 0, savingsTarget: 0, recurring: []);
   DailyBudget? dailyBudget;
   List<Insight> insights = [];
@@ -38,6 +39,7 @@ class AppState extends ChangeNotifier {
     categories = await _db.listCategories();
     budgets = await _db.listBudgets();
     pendingSms = await _db.listPendingSms();
+    pendingEmails = await _db.listPendingEmails();
     recentTxns = await _db.listTxns(limit: 30);
     setup = await _setupSvc.load();
     final (from, to) = monthRange(selectedMonth);
@@ -144,6 +146,17 @@ class AppState extends ChangeNotifier {
 
   Future<void> dismissPendingSms(PendingSms s) async {
     await _db.deletePendingSms(s.id!);
+    await refreshAll();
+  }
+
+  Future<void> resolvePendingEmail(PendingEmail e, {required Txn txn}) async {
+    await _db.insertTxn(txn);
+    await _db.deletePendingEmail(e.id!);
+    await refreshAll();
+  }
+
+  Future<void> dismissPendingEmail(PendingEmail e) async {
+    await _db.deletePendingEmail(e.id!);
     await refreshAll();
   }
 

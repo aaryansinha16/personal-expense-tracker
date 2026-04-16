@@ -4,6 +4,7 @@ import 'package:another_telephony/telephony.dart';
 
 import '../db/database.dart';
 import '../db/models.dart';
+import '../services/transaction_deduper.dart';
 import 'parser.dart';
 
 String _hashSms(String sender, String body, int? date) {
@@ -42,6 +43,7 @@ class SmsService {
 
     int imported = 0;
     int queued = 0;
+    int deduped = 0;
     final db = AppDb.instance;
 
     for (final m in messages) {
@@ -52,7 +54,6 @@ class SmsService {
 
       final knownSender = SmsParser.isFinancialSender(sender);
       final looksFinancial = SmsParser.looksFinancial(body);
-      // Skip clearly non-financial noise (e.g. delivery updates without amounts).
       if (!knownSender && !looksFinancial) continue;
 
       final hash = _hashSms(sender, body, ts);
@@ -62,8 +63,7 @@ class SmsService {
 
       if (parsed != null && parsed.isCardPayment) {
         // CC "payment received" SMS is the other side of a bank debit we
-        // already recorded. Skip entirely so the bill payment isn't counted
-        // as both expense and income.
+        // already recorded. Skip entirely.
         await db.markSmsProcessed(hash);
         continue;
       }
@@ -77,7 +77,7 @@ class SmsService {
         queued++;
       } else {
         final categoryId = await _autoCategoryId(db, parsed.merchant, parsed.type);
-        await db.insertTxn(Txn(
+        final candidate = Txn(
           amount: parsed.amount,
           type: parsed.type,
           categoryId: categoryId,
@@ -86,13 +86,24 @@ class SmsService {
           source: TxnSource.sms,
           rawSms: jsonEncode({'sender': sender, 'body': body}),
           account: parsed.account,
-        ));
-        imported++;
+        );
+        final dup = await TransactionDeduper.findDuplicate(candidate);
+        if (dup != null) {
+          deduped++;
+        } else {
+          await db.insertTxn(candidate);
+          imported++;
+        }
       }
       await db.markSmsProcessed(hash);
     }
 
-    return ImportResult(imported: imported, queued: queued, scanned: messages.length);
+    return ImportResult(
+      imported: imported,
+      queued: queued,
+      deduped: deduped,
+      scanned: messages.length,
+    );
   }
 
   /// Register a foreground listener for new SMS.
@@ -127,7 +138,7 @@ class SmsService {
           ));
         } else {
           final categoryId = await _autoCategoryId(db, parsed.merchant, parsed.type);
-          await db.insertTxn(Txn(
+          final candidate = Txn(
             amount: parsed.amount,
             type: parsed.type,
             categoryId: categoryId,
@@ -136,7 +147,9 @@ class SmsService {
             source: TxnSource.sms,
             rawSms: jsonEncode({'sender': sender, 'body': body}),
             account: parsed.account,
-          ));
+          );
+          final dup = await TransactionDeduper.findDuplicate(candidate);
+          if (dup == null) await db.insertTxn(candidate);
         }
         await db.markSmsProcessed(hash);
         onNewTxn();
@@ -184,6 +197,12 @@ class SmsService {
 class ImportResult {
   final int imported;
   final int queued;
+  final int deduped;
   final int scanned;
-  ImportResult({required this.imported, required this.queued, required this.scanned});
+  ImportResult({
+    required this.imported,
+    required this.queued,
+    required this.scanned,
+    this.deduped = 0,
+  });
 }
