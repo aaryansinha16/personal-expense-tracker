@@ -21,7 +21,7 @@ subprojects {
 
 // Force every Flutter plugin subproject to compile Java and Kotlin at the
 // same JVM target. Some plugins (e.g. receive_sharing_intent) still declare
-// Java 1.8 while their Kotlin side is 17, which breaks AGP 8.
+// Java 1.8 while their Kotlin side is 17, which AGP 8 rejects.
 subprojects {
     afterEvaluate {
         extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {
@@ -31,8 +31,8 @@ subprojects {
             }
         }
         tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile::class.java).configureEach {
-            kotlinOptions {
-                jvmTarget = JavaVersion.VERSION_17.toString()
+            compilerOptions {
+                jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
             }
         }
     }
