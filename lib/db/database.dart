@@ -16,7 +16,7 @@ class AppDb {
     final path = p.join(dir, 'expense_tracker.db');
     _db = await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -29,6 +29,9 @@ class AppDb {
     }
     if (oldVersion < 3) {
       await db.execute(_processedEmailsSchema);
+    }
+    if (oldVersion < 4) {
+      await db.execute(_emailSendersSchema);
     }
   }
 
@@ -48,6 +51,17 @@ class AppDb {
     CREATE TABLE processed_emails (
       message_id TEXT PRIMARY KEY,
       processed_at INTEGER NOT NULL
+    )
+  ''';
+
+  static const _emailSendersSchema = '''
+    CREATE TABLE email_senders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      domain_suffix TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      category_hint TEXT,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1
     )
   ''';
 
@@ -109,6 +123,7 @@ class AppDb {
     ''');
     await db.execute(_recurringExpensesSchema);
     await db.execute(_processedEmailsSchema);
+    await db.execute(_emailSendersSchema);
 
     await _seedCategories(db);
   }
@@ -349,6 +364,70 @@ class AppDb {
 
   Future<int> deleteRecurringExpense(int id) async =>
       (await db).delete('recurring_expenses', where: 'id=?', whereArgs: [id]);
+
+  // Email senders
+  Future<List<Map<String, Object?>>> listEmailSenders() async {
+    final d = await db;
+    return d.query('email_senders', orderBy: 'category_hint ASC, display_name ASC');
+  }
+
+  /// Insert a default sender if it doesn't exist yet. Existing rows are
+  /// left alone so user toggles/renames are preserved across app updates.
+  Future<void> seedDefaultSenderIfMissing({
+    required String domainSuffix,
+    required String displayName,
+    String? categoryHint,
+  }) async {
+    final d = await db;
+    await d.insert(
+      'email_senders',
+      {
+        'domain_suffix': domainSuffix,
+        'display_name': displayName,
+        'category_hint': categoryHint,
+        'is_default': 1,
+        'enabled': 1,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
+  Future<int> upsertEmailSender({
+    int? id,
+    required String domainSuffix,
+    required String displayName,
+    String? categoryHint,
+    bool isDefault = false,
+    bool enabled = true,
+  }) async {
+    final d = await db;
+    final row = {
+      'domain_suffix': domainSuffix,
+      'display_name': displayName,
+      'category_hint': categoryHint,
+      'is_default': isDefault ? 1 : 0,
+      'enabled': enabled ? 1 : 0,
+    };
+    if (id != null) {
+      return d.update('email_senders', row, where: 'id=?', whereArgs: [id]);
+    }
+    return d.insert('email_senders', row,
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<int> setEmailSenderEnabled(int id, bool enabled) async {
+    final d = await db;
+    return d.update('email_senders', {'enabled': enabled ? 1 : 0},
+        where: 'id=?', whereArgs: [id]);
+  }
+
+  /// Only non-default senders can be deleted. Defaults are hidden by toggling
+  /// them off instead.
+  Future<int> deleteEmailSender(int id) async {
+    final d = await db;
+    return d.delete('email_senders',
+        where: 'id=? AND is_default=0', whereArgs: [id]);
+  }
 }
 
 class SmsResetResult {

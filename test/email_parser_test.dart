@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:expense_tracker/email/parser.dart';
-import 'package:expense_tracker/email/sender_rules.dart';
+import 'package:expense_tracker/email/sender_registry.dart';
 
 void main() {
   group('EmailParser.parse', () {
@@ -191,19 +191,30 @@ void main() {
     });
   });
 
-  group('SenderRules', () {
+  group('SenderRegistry (seed fallback)', () {
+    // Tests hit the static-seed fallback since load() isn't called.
+    final r = SenderRegistry.instance;
+
     test('matches by domain suffix', () {
-      expect(SenderRules.match('orders@swiggy.in'.split('@').last)?.displayName, 'Swiggy');
-      expect(SenderRules.match('auto-confirm@amazon.in'.split('@').last)?.displayName, 'Amazon');
-      expect(SenderRules.match('ship.amazon.in')?.displayName, 'Amazon');
+      expect(r.match('orders@swiggy.in'.split('@').last)?.displayName, 'Swiggy');
+      expect(r.match('auto-confirm@amazon.in'.split('@').last)?.displayName, 'Amazon');
+      expect(r.match('ship.amazon.in')?.displayName, 'Amazon');
+    });
+    test('longest suffix wins', () {
+      // hdfcbank.com vs hdfcbank.net — a "xyz.hdfcbank.net" sender should
+      // match the .net rule, not the shorter .com one.
+      expect(r.match('alerts@hdfcbank.net')?.displayName, 'HDFC Bank');
+      expect(r.match('notify.sbicard.com')?.displayName, 'SBI Card');
     });
     test('unknown domain returns null', () {
-      expect(SenderRules.match('foo@bar.com'.split('@').last), isNull);
+      expect(r.match('foo@bar.com'.split('@').last), isNull);
     });
     test('gmailQuery contains all senders', () {
-      final q = SenderRules.gmailQuery();
+      final q = r.gmailQuery();
       expect(q.contains('from:swiggy.in'), true);
       expect(q.contains('from:amazon.in'), true);
+      expect(q.contains('from:hdfcbank.net'), true);
+      expect(q.contains('from:npci.org.in'), true);
       expect(q.contains('-subject:otp'), true);
     });
   });
