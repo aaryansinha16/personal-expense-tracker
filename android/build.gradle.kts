@@ -14,15 +14,13 @@ rootProject.layout.buildDirectory.value(newBuildDir)
 subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
-}
-subprojects {
-    project.evaluationDependsOn(":app")
-}
 
-// Force every Flutter plugin subproject to compile Java and Kotlin at the
-// same JVM target. Some plugins (e.g. receive_sharing_intent) still declare
-// Java 1.8 while their Kotlin side is 17, which AGP 8 rejects.
-subprojects {
+    // Force every Flutter plugin subproject to compile Java and Kotlin at the
+    // same JVM target. Some plugins (e.g. receive_sharing_intent) still declare
+    // Java 1.8 while their Kotlin side is 17, which AGP 8 rejects.
+    // NOTE: this afterEvaluate must be registered *before* the
+    // evaluationDependsOn block below, which otherwise eagerly evaluates
+    // subprojects and makes later afterEvaluate registrations illegal.
     afterEvaluate {
         extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {
             compileOptions {
@@ -36,6 +34,10 @@ subprojects {
             }
         }
     }
+}
+
+subprojects {
+    project.evaluationDependsOn(":app")
 }
 
 tasks.register<Delete>("clean") {
