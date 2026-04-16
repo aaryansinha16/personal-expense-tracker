@@ -178,35 +178,56 @@ class GmailService {
 
     try {
       final api = gmail.GmailApi(client);
+      final db = AppDb.instance;
+
+      // 1) Resume any items cached from a previous failed sync. Zero cost,
+      // zero Gmail API calls.
+      final cached = <TriageItem>[];
+      final cachedIds = <String>{};
+      for (final row in await db.listPendingRawItems()) {
+        if ((row['source'] as String?) != 'email') continue;
+        final sid = row['source_id'] as String;
+        cachedIds.add(sid);
+        cached.add(TriageItem(
+          queueId: -1,
+          source: 'email',
+          sender: row['sender'] as String,
+          subject: row['subject'] as String?,
+          body: row['body'] as String,
+          sourceId: sid,
+          sourceDate: DateTime.fromMillisecondsSinceEpoch(row['received_at'] as int),
+        ));
+      }
+
+      // 2) List fresh Gmail IDs and skip ones we already have cached or
+      // already processed.
       final list = await api.users.messages.list(
         'me',
         q: _buildQuery(since),
         maxResults: maxMessages,
       );
       final msgs = list.messages ?? const [];
-
-      // First pass: filter out already-processed IDs so we only fetch bodies
-      // for the ones we actually need.
-      final db = AppDb.instance;
       final needed = <String>[];
       for (final m in msgs) {
         final id = m.id;
         if (id == null) continue;
+        if (cachedIds.contains(id)) continue;
         if (await db.isEmailProcessed(id)) continue;
         needed.add(id);
       }
-      final total = needed.length;
-      if (total == 0) {
-        onProgress?.call(0, 0);
-        return const [];
+      final totalFresh = needed.length;
+      final totalOverall = totalFresh + cached.length;
+
+      if (totalFresh == 0) {
+        onProgress?.call(cached.length, totalOverall);
+        return cached;
       }
 
-      // Fetch full messages in parallel windows. Gmail API handles concurrent
-      // requests fine; 10 in flight keeps well under per-minute quotas.
-      final items = <TriageItem>[];
+      // 3) Fetch bodies in parallel windows, caching each as we go.
+      final items = <TriageItem>[...cached];
       var fetched = 0;
-      for (var start = 0; start < total; start += concurrency) {
-        final end = (start + concurrency).clamp(0, total);
+      for (var start = 0; start < totalFresh; start += concurrency) {
+        final end = (start + concurrency).clamp(0, totalFresh);
         final chunk = needed.sublist(start, end);
         final fulls = await Future.wait(
           chunk.map((id) => api.users.messages.get('me', id, format: 'full')),
@@ -226,6 +247,7 @@ class GmailService {
             }
           }
           final body = _extractBody(full.payload);
+          final date = _messageDate(full);
           items.add(TriageItem(
             queueId: -1,
             source: 'email',
@@ -233,11 +255,20 @@ class GmailService {
             subject: subject.isEmpty ? null : subject,
             body: body,
             sourceId: id,
-            sourceDate: _messageDate(full),
+            sourceDate: date,
           ));
+          // Cache as we go — survives app-kill mid-fetch.
+          await db.insertPendingRawItem(
+            source: 'email',
+            sourceId: id,
+            sender: sender,
+            subject: subject.isEmpty ? null : subject,
+            body: body,
+            receivedAt: date,
+          );
         }
         fetched += chunk.length;
-        onProgress?.call(fetched, total);
+        onProgress?.call(cached.length + fetched, totalOverall);
       }
 
       return items;

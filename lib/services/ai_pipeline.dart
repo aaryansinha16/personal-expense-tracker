@@ -34,7 +34,7 @@ class AiPipeline {
   final AiTriageService _ai;
   final int batchSize;
 
-  AiPipeline({AiTriageService? service, this.batchSize = 20})
+  AiPipeline({AiTriageService? service, this.batchSize = 10})
       : _ai = service ?? AiTriageService.instance;
 
   Future<PipelineResult> classifyAll(

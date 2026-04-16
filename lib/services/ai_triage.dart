@@ -73,7 +73,17 @@ class AiTriageService {
   static const _kCumulativeUsd = 'ai_triage_cum_usd';
   static const _kItemsTriaged = 'ai_triage_items_total';
   static const _defaultModel = 'claude-haiku-4-5';
-  static const _maxTokens = 1024;
+
+  /// Budget enough output tokens for the batch — a decision JSON runs
+  /// 70–120 tokens, so 150/item + 500 overhead comfortably covers a
+  /// verbose response without truncating mid-string. Capped at 8192
+  /// (Haiku's ceiling).
+  int _maxTokensFor(int itemCount) {
+    final v = (itemCount * 150) + 500;
+    if (v > 8192) return 8192;
+    if (v < 1024) return 1024;
+    return v;
+  }
 
   Future<String> getModel() async {
     final prefs = await SharedPreferences.getInstance();
@@ -188,6 +198,7 @@ class AiTriageService {
     final response = await _callApi(
       [_message(role: 'user', text: body.toString())],
       system: sys,
+      itemCount: items.length,
     );
 
     final usage = response['usage'] as Map<String, dynamic>?;
@@ -211,15 +222,29 @@ class AiTriageService {
   }
 
   List<AiDecision> _parseBatchDecisions(String text, int expectedCount) {
-    final startIdx = text.indexOf('[');
-    final endIdx = text.lastIndexOf(']');
+    // Strip optional markdown code fence (```json ... ```). Claude sometimes
+    // wraps JSON in fences even when told not to.
+    final cleaned = _stripCodeFence(text);
+    final startIdx = cleaned.indexOf('[');
+    final endIdx = cleaned.lastIndexOf(']');
     if (startIdx < 0 || endIdx < 0 || endIdx < startIdx) {
+      // Response looked like JSON (had `[`) but got truncated before the
+      // closing `]` — surface that specifically so the user knows it was
+      // a token-limit issue, not Claude returning prose.
+      final preview = cleaned.length > 200 ? cleaned.substring(0, 200) : cleaned;
+      if (startIdx >= 0 && endIdx < 0) {
+        throw FormatException(
+          'Claude response truncated before closing `]` '
+          '(${cleaned.length} chars output). Usually means max_tokens was '
+          'too small. First 200 chars: $preview',
+        );
+      }
       throw FormatException(
-        'Claude returned non-JSON text (${text.length} chars). '
-        'First 200 chars: ${text.substring(0, text.length > 200 ? 200 : text.length)}',
+        'Claude returned non-JSON text (${cleaned.length} chars). '
+        'First 200 chars: $preview',
       );
     }
-    final arr = text.substring(startIdx, endIdx + 1);
+    final arr = cleaned.substring(startIdx, endIdx + 1);
     final decoded = jsonDecode(arr);
     if (decoded is! List) {
       throw const FormatException('Claude response root was not a JSON array');
@@ -228,6 +253,16 @@ class AiTriageService {
         .whereType<Map<String, dynamic>>()
         .map(AiDecision.fromJson)
         .toList();
+  }
+
+  String _stripCodeFence(String text) {
+    final t = text.trim();
+    // ```json\n...\n```  or ```\n...\n```
+    final fenceRe = RegExp(r'^```(?:json)?\s*([\s\S]*?)\s*```\s*$',
+        multiLine: true);
+    final m = fenceRe.firstMatch(t);
+    if (m != null) return m.group(1)!.trim();
+    return t;
   }
 
   Map<String, Object?> _message({required String role, required String text}) =>
@@ -241,6 +276,7 @@ class AiTriageService {
   Future<Map<String, dynamic>> _callApi(
     List<Map<String, Object?>> messages, {
     String? system,
+    int itemCount = 1,
   }) async {
     final key = await getApiKey();
     if (key == null) {
@@ -248,7 +284,7 @@ class AiTriageService {
     }
     final body = <String, Object?>{
       'model': await getModel(),
-      'max_tokens': _maxTokens,
+      'max_tokens': _maxTokensFor(itemCount),
       'messages': messages,
     };
     if (system != null) {
@@ -317,7 +353,7 @@ Rules:
 - If you're unsure whether it's a real transaction, set confidence: "low" and reasoning that explains the ambiguity.
 - Never invent amounts. If no amount is clearly the transaction amount, return null and low confidence.
 
-Return ONLY the JSON array, no prose.''';
+Return ONLY the raw JSON array. No prose. No markdown fences. Start your response with `[` and end with `]`.''';
   }
 }
 

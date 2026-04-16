@@ -59,7 +59,11 @@ class _ExpenseAppState extends State<ExpenseApp> {
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (_) => AppState()..init(),
+      create: (_) {
+        final s = AppState()..init();
+        BackgroundSync.instance.bindAppState(s);
+        return s;
+      },
       child: MaterialApp(
         title: 'Expense Tracker',
         debugShowCheckedModeBanner: false,
