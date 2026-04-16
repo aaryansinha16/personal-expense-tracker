@@ -16,24 +16,57 @@ class TxnTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final cat = state.categoryById(txn.categoryId);
     final isCredit = txn.type == TxnType.credit;
-    return ListTile(
-      onTap: onTap,
-      leading: CategoryIcon(category: cat),
-      title: Text(
-        txn.merchant ?? txn.note ?? cat?.name ?? 'Transaction',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      subtitle: Text(
-        '${cat?.name ?? 'Uncategorized'} • ${timeShort(txn.date)}${txn.source == TxnSource.sms ? ' • SMS' : ''}',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: Text(
-        '${isCredit ? '+' : '-'} ${inr(txn.amount)}',
-        style: TextStyle(
-          color: isCredit ? Colors.green.shade700 : Colors.red.shade700,
-          fontWeight: FontWeight.w600,
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final amountColor = isCredit
+        ? (theme.brightness == Brightness.light ? const Color(0xFF1B8E5A) : const Color(0xFF5FD39A))
+        : (theme.brightness == Brightness.light ? const Color(0xFFD63B3B) : const Color(0xFFFF8080));
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            children: [
+              CategoryIcon(category: cat),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      txn.merchant ?? txn.note ?? cat?.name ?? 'Transaction',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${cat?.name ?? 'Uncategorized'} · ${timeShort(txn.date)}${txn.source == TxnSource.sms ? ' · SMS' : ''}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: scheme.onSurface.withOpacity(0.55),
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${isCredit ? '+' : '-'}${inr(txn.amount)}',
+                style: TextStyle(
+                  color: amountColor,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

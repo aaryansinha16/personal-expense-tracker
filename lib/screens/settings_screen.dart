@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../db/models.dart';
 import '../providers/app_state.dart';
 import '../utils/formatters.dart';
+import '../widgets/bubble_card.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -13,62 +14,129 @@ class SettingsScreen extends StatelessWidget {
     final state = context.watch<AppState>();
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 180),
         children: [
-          const ListTile(
-            title: Text('Categories', style: TextStyle(fontWeight: FontWeight.w600)),
-          ),
-          ...state.categories.map((c) => ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: Color(c.color).withOpacity(0.2),
-                  child: Icon(IconData(c.icon, fontFamily: 'MaterialIcons'), color: Color(c.color), size: 20),
+          const SectionHeader(title: 'CATEGORIES'),
+          BubbleCard(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Column(
+              children: [
+                for (final c in state.categories) _categoryTile(context, state, c),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                ListTile(
+                  leading: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(Icons.add_rounded, color: Theme.of(context).colorScheme.primary),
+                  ),
+                  title: const Text('Add category', style: TextStyle(fontWeight: FontWeight.w600)),
+                  onTap: () => _addCategoryDialog(context, state),
                 ),
-                title: Text(c.name),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                  onPressed: () => state.deleteCategory(c.id!),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          const SectionHeader(title: 'MONTHLY BUDGETS'),
+          BubbleCard(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Column(
+              children: [
+                if (state.budgets.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+                    child: Text('No budgets set', style: TextStyle(color: Colors.grey)),
+                  )
+                else
+                  for (final b in state.budgets) _budgetTile(context, state, b),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                ListTile(
+                  leading: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(Icons.add_rounded, color: Theme.of(context).colorScheme.primary),
+                  ),
+                  title: const Text('Set budget', style: TextStyle(fontWeight: FontWeight.w600)),
+                  onTap: () => _addBudgetDialog(context, state),
                 ),
-              )),
-          ListTile(
-            leading: const Icon(Icons.add),
-            title: const Text('Add category'),
-            onTap: () => _addCategoryDialog(context, state),
+              ],
+            ),
           ),
-          const Divider(),
-          const ListTile(
-            title: Text('Monthly Budgets', style: TextStyle(fontWeight: FontWeight.w600)),
-          ),
-          ...state.budgets.map((b) {
-            final cat = state.categoryById(b.categoryId);
-            return ListTile(
-              title: Text(cat?.name ?? 'Category'),
-              subtitle: Text(inr(b.monthlyLimit)),
-              trailing: IconButton(
-                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                onPressed: () => state.deleteBudget(b.categoryId),
-              ),
-            );
-          }),
-          ListTile(
-            leading: const Icon(Icons.add),
-            title: const Text('Set budget'),
-            onTap: () => _addBudgetDialog(context, state),
-          ),
-          const Divider(),
-          const ListTile(
-            title: Text('About', style: TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text('Personal expense tracker. All data stays on your device.'),
+          const SizedBox(height: 20),
+          const SectionHeader(title: 'ABOUT'),
+          BubbleCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Expense Tracker', style: TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 4),
+                Text(
+                  'All data stays on your device. No cloud sync.',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
+  Widget _categoryTile(BuildContext context, AppState state, Category c) {
+    return ListTile(
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: Color(c.color).withOpacity(0.16),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Icon(IconData(c.icon, fontFamily: 'MaterialIcons'), color: Color(c.color), size: 22),
+      ),
+      title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+      trailing: IconButton(
+        icon: Icon(Icons.delete_outline_rounded, color: Colors.red.shade400),
+        onPressed: () => state.deleteCategory(c.id!),
+      ),
+    );
+  }
+
+  Widget _budgetTile(BuildContext context, AppState state, Budget b) {
+    final cat = state.categoryById(b.categoryId);
+    return ListTile(
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: Color(cat?.color ?? 0xFF9575CD).withOpacity(0.16),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Icon(Icons.pie_chart_rounded, color: Color(cat?.color ?? 0xFF9575CD), size: 20),
+      ),
+      title: Text(cat?.name ?? 'Category', style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(inr(b.monthlyLimit)),
+      trailing: IconButton(
+        icon: Icon(Icons.delete_outline_rounded, color: Colors.red.shade400),
+        onPressed: () => state.deleteBudget(b.categoryId),
+      ),
+    );
+  }
+
   Future<void> _addCategoryDialog(BuildContext context, AppState state) async {
     final ctrl = TextEditingController();
-    int iconCode = Icons.category.codePoint;
-    int color = 0xFF9575CD;
     await showDialog(
       context: context,
       builder: (c) => AlertDialog(
@@ -79,7 +147,11 @@ class SettingsScreen extends StatelessWidget {
           FilledButton(
             onPressed: () async {
               if (ctrl.text.trim().isEmpty) return;
-              await state.addCategory(Category(name: ctrl.text.trim(), icon: iconCode, color: color));
+              await state.addCategory(Category(
+                name: ctrl.text.trim(),
+                icon: Icons.category.codePoint,
+                color: 0xFF9575CD,
+              ));
               if (c.mounted) Navigator.pop(c);
             },
             child: const Text('Add'),
@@ -103,11 +175,13 @@ class SettingsScreen extends StatelessWidget {
               DropdownButtonFormField<int?>(
                 initialValue: catId,
                 decoration: const InputDecoration(labelText: 'Category'),
+                borderRadius: BorderRadius.circular(18),
                 items: state.categories
                     .map((cat) => DropdownMenuItem<int?>(value: cat.id, child: Text(cat.name)))
                     .toList(),
                 onChanged: (v) => setSt(() => catId = v),
               ),
+              const SizedBox(height: 12),
               TextField(
                 controller: ctrl,
                 decoration: const InputDecoration(labelText: 'Monthly limit (₹)'),

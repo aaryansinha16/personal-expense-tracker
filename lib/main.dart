@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'providers/app_state.dart';
 import 'screens/home_screen.dart';
+import 'theme/app_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,16 +20,8 @@ class ExpenseApp extends StatelessWidget {
       child: MaterialApp(
         title: 'Expense Tracker',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          useMaterial3: true,
-          colorSchemeSeed: Colors.indigo,
-          brightness: Brightness.light,
-        ),
-        darkTheme: ThemeData(
-          useMaterial3: true,
-          colorSchemeSeed: Colors.indigo,
-          brightness: Brightness.dark,
-        ),
+        theme: AppTheme.light(),
+        darkTheme: AppTheme.dark(),
         home: const HomeScreen(),
       ),
     );
