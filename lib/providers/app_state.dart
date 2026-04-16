@@ -2,14 +2,17 @@ import 'package:flutter/foundation.dart' hide Category;
 
 import '../db/database.dart';
 import '../db/models.dart';
+import '../services/monthly_setup.dart';
 
 class AppState extends ChangeNotifier {
   final AppDb _db = AppDb.instance;
+  final MonthlySetupService _setupSvc = MonthlySetupService.instance;
 
   List<Category> categories = [];
   List<Txn> recentTxns = [];
   List<Budget> budgets = [];
   List<PendingSms> pendingSms = [];
+  MonthlySetup setup = MonthlySetup(monthlyIncome: 0, savingsTarget: 0, recurring: []);
 
   Map<String, double> monthTotals = {'debit': 0, 'credit': 0};
   DateTime selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
@@ -19,6 +22,7 @@ class AppState extends ChangeNotifier {
   Future<void> init() async {
     loading = true;
     notifyListeners();
+    await _setupSvc.autoPostDueRecurring();
     await refreshAll();
     loading = false;
     notifyListeners();
@@ -29,9 +33,31 @@ class AppState extends ChangeNotifier {
     budgets = await _db.listBudgets();
     pendingSms = await _db.listPendingSms();
     recentTxns = await _db.listTxns(limit: 30);
+    setup = await _setupSvc.load();
     final (from, to) = monthRange(selectedMonth);
     monthTotals = await _db.totalsByType(from, to);
     notifyListeners();
+  }
+
+  Future<void> setIncome(double v) async {
+    await _setupSvc.setIncome(v);
+    await refreshAll();
+  }
+
+  Future<void> setSavingsTarget(double v) async {
+    await _setupSvc.setSavingsTarget(v);
+    await refreshAll();
+  }
+
+  Future<void> upsertRecurring(RecurringExpense r) async {
+    await _db.upsertRecurringExpense(r);
+    await _setupSvc.autoPostDueRecurring();
+    await refreshAll();
+  }
+
+  Future<void> deleteRecurring(int id) async {
+    await _db.deleteRecurringExpense(id);
+    await refreshAll();
   }
 
   Category? categoryById(int? id) {

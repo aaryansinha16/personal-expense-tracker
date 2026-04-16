@@ -170,3 +170,56 @@ class PendingSms {
         receivedAt: DateTime.fromMillisecondsSinceEpoch(m['received_at'] as int),
       );
 }
+
+class RecurringExpense {
+  final int? id;
+  final String name;
+  final double amount;
+  final int? categoryId;
+  final int dayOfMonth; // 1-31, clamped to last day if month is shorter
+  final bool active;
+
+  RecurringExpense({
+    this.id,
+    required this.name,
+    required this.amount,
+    this.categoryId,
+    required this.dayOfMonth,
+    this.active = true,
+  });
+
+  Map<String, dynamic> toMap() => {
+        if (id != null) 'id': id,
+        'name': name,
+        'amount': amount,
+        'category_id': categoryId,
+        'day_of_month': dayOfMonth,
+        'active': active ? 1 : 0,
+      };
+
+  factory RecurringExpense.fromMap(Map<String, dynamic> m) => RecurringExpense(
+        id: m['id'] as int?,
+        name: m['name'] as String,
+        amount: (m['amount'] as num).toDouble(),
+        categoryId: m['category_id'] as int?,
+        dayOfMonth: m['day_of_month'] as int,
+        active: (m['active'] as int? ?? 1) == 1,
+      );
+
+  RecurringExpense copyWith({
+    int? id,
+    String? name,
+    double? amount,
+    int? categoryId,
+    int? dayOfMonth,
+    bool? active,
+  }) =>
+      RecurringExpense(
+        id: id ?? this.id,
+        name: name ?? this.name,
+        amount: amount ?? this.amount,
+        categoryId: categoryId ?? this.categoryId,
+        dayOfMonth: dayOfMonth ?? this.dayOfMonth,
+        active: active ?? this.active,
+      );
+}
