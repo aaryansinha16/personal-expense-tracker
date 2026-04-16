@@ -7,6 +7,7 @@ import '../utils/formatters.dart';
 import '../widgets/bubble_card.dart';
 import '../widgets/floating_nav.dart';
 import 'budget_setup_screen.dart';
+import 'email_sync_screen.dart';
 import 'import_email_screen.dart';
 import 'sms_sync_screen.dart';
 
@@ -77,7 +78,32 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          const SectionHeader(title: 'EMAIL IMPORT'),
+          const SectionHeader(title: 'EMAIL'),
+          BubbleCard(
+            padding: EdgeInsets.zero,
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const EmailSyncScreen(),
+            )),
+            child: ListTile(
+              leading: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(Icons.cloud_sync_rounded, color: Theme.of(context).colorScheme.primary),
+              ),
+              title: const Text('Gmail auto-sync',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(
+                'Connect a Google account and scan merchant emails',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+            ),
+          ),
+          const SizedBox(height: 8),
           BubbleCard(
             padding: EdgeInsets.zero,
             onTap: () => Navigator.of(context).push(MaterialPageRoute(

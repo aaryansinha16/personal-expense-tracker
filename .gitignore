@@ -26,6 +26,7 @@ android/app/debug
 android/app/profile
 android/app/release
 android/app/upload-keystore.jks
+android/app/release.keystore
 android/key.properties
 
 # Generated
