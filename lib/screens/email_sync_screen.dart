@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 
 import '../email/gmail_service.dart';
 import '../providers/app_state.dart';
+import '../services/ai_pipeline.dart';
+import '../services/sync_prefs.dart';
 import '../widgets/bubble_card.dart';
 
 class EmailSyncScreen extends StatefulWidget {
@@ -50,33 +52,86 @@ class _EmailSyncScreenState extends State<EmailSyncScreen> {
       _busy = true;
       _status = null;
     });
+    final useAi = await SyncPrefs.aiMode();
     try {
-      final res = await _gmail.scanInbox(since: since);
-      if (mounted) {
-        await context.read<AppState>().refreshAll();
-        setState(() {
-          _busy = false;
-          _status = res.error != null
-              ? 'Error: ${res.error}'
-              : 'Scanned ${res.scanned} · imported ${res.imported} · '
-                  'review ${res.queued} · deduped ${res.deduped} · skipped ${res.skipped}';
-        });
+      if (useAi) {
+        await _aiScan(since);
+      } else {
+        final res = await _gmail.scanInbox(since: since);
+        if (mounted) {
+          await context.read<AppState>().refreshAll();
+          setState(() {
+            _status = res.error != null
+                ? 'Error: ${res.error}'
+                : 'Scanned ${res.scanned} · imported ${res.imported} · '
+                    'review ${res.queued} · deduped ${res.deduped} · skipped ${res.skipped}';
+          });
+        }
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _status = 'Scan failed: $e';
-        });
-      }
+      if (mounted) setState(() => _status = 'Scan failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _aiScan(DateTime since) async {
+    setState(() => _status = 'Fetching emails…');
+    final items = await _gmail.fetchRawForAi(since: since);
+    if (!mounted) return;
+
+    final estInr = AiPipeline.estimateInrRounded(smsCount: 0, emailCount: items.length);
+    final estUsd = AiPipeline.estimateUsd(smsCount: 0, emailCount: items.length);
+    final proceed = await _confirmCost(items.length, estInr, estUsd);
+    if (!proceed) {
+      setState(() => _status = 'Cancelled.');
+      return;
+    }
+
+    final state = context.read<AppState>();
+    final res = await state.runAiSync(
+      fetch: () async => items,
+      onProgress: (p) {
+        if (mounted) {
+          setState(() {
+            _status = 'Batch ${p.batchIndex}/${p.totalBatches} · '
+                '${p.itemsDone}/${p.itemsTotal} items · '
+                '\$${p.usdSpent.toStringAsFixed(4)}';
+          });
+        }
+      },
+    );
+    if (mounted) {
+      setState(() {
+        _status = 'Done · ${res.imported} imported · ${res.dismissed} dismissed · '
+            '${res.kept} kept · \$${res.usdCost.toStringAsFixed(4)}';
+      });
+    }
+  }
+
+  Future<bool> _confirmCost(int count, int inr, double usd) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Run AI classification?'),
+        content: Text(
+          '$count emails will be sent to Claude Haiku.\n\n'
+          'Estimated cost: ~\$${usd.toStringAsFixed(3)} (~₹$inr).',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Proceed')),
+        ],
+      ),
+    );
+    return ok == true;
   }
 
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
       initialDate: DateTime.now().subtract(const Duration(days: 30)),
-      firstDate: DateTime(2020),
+      firstDate: DateTime.now().subtract(const Duration(days: 90)),
       lastDate: DateTime.now(),
     );
     if (picked != null) {

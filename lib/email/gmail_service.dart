@@ -7,6 +7,7 @@ import 'package:googleapis/gmail/v1.dart' as gmail;
 import '../db/database.dart';
 import '../db/models.dart';
 import '../services/transaction_deduper.dart';
+import '../services/ai_triage.dart';
 import 'parser.dart';
 import 'sender_registry.dart';
 
@@ -156,10 +157,70 @@ class GmailService {
     }
   }
 
+  /// Hard cap on how far back we ever scan.
+  static const Duration _maxLookback = Duration(days: 90);
+
+  /// Fetch raw messages as TriageItems for the AI pipeline. Does NOT
+  /// insert anything into the DB; the caller is responsible for that via
+  /// AppState.applyAiDecisions.
+  Future<List<TriageItem>> fetchRawForAi({
+    DateTime? since,
+    int maxMessages = 200,
+  }) async {
+    final account = _signIn.currentUser ?? await _signIn.signInSilently();
+    if (account == null) {
+      throw StateError('Not signed in to Gmail');
+    }
+    final client = await _signIn.authenticatedClient();
+    if (client == null) throw StateError('Gmail auth failed');
+
+    try {
+      final api = gmail.GmailApi(client);
+      final list = await api.users.messages.list(
+        'me',
+        q: _buildQuery(since),
+        maxResults: maxMessages,
+      );
+      final msgs = list.messages ?? const [];
+      final items = <TriageItem>[];
+      final db = AppDb.instance;
+      for (final m in msgs) {
+        final id = m.id;
+        if (id == null) continue;
+        if (await db.isEmailProcessed(id)) continue;
+        final full = await api.users.messages.get('me', id, format: 'full');
+        final headers = full.payload?.headers ?? const [];
+        String sender = '';
+        String subject = '';
+        for (final h in headers) {
+          final name = (h.name ?? '').toLowerCase();
+          if (name == 'from') {
+            sender = h.value ?? '';
+          } else if (name == 'subject') {
+            subject = h.value ?? '';
+          }
+        }
+        final body = _extractBody(full.payload);
+        items.add(TriageItem(
+          queueId: -1, // placeholder — not in any queue yet
+          source: 'email',
+          sender: sender,
+          subject: subject.isEmpty ? null : subject,
+          body: body,
+        ));
+        await db.markEmailProcessed(id);
+      }
+      return items;
+    } finally {
+      client.close();
+    }
+  }
+
   String _buildQuery(DateTime? since) {
     final base = SenderRegistry.instance.gmailQuery();
-    if (since == null) return base;
-    final ts = (since.millisecondsSinceEpoch ~/ 1000);
+    final cap = DateTime.now().subtract(_maxLookback);
+    final effective = (since == null || since.isBefore(cap)) ? cap : since;
+    final ts = (effective.millisecondsSinceEpoch ~/ 1000);
     return '$base after:$ts';
   }
 

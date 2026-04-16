@@ -4,6 +4,7 @@ import 'package:another_telephony/telephony.dart';
 
 import '../db/database.dart';
 import '../db/models.dart';
+import '../services/ai_triage.dart';
 import '../services/notifications.dart';
 import '../services/transaction_deduper.dart';
 import 'parser.dart';
@@ -26,21 +27,55 @@ class SmsService {
     return ok ?? false;
   }
 
-  /// Scan inbox for historical SMS and import matching ones.
-  /// [since] filters by date (inclusive).
-  Future<ImportResult> scanInbox({DateTime? since}) async {
-    final messages = await _telephony.getInboxSms(
-      columns: [
-        SmsColumn.ADDRESS,
-        SmsColumn.BODY,
-        SmsColumn.DATE,
-      ],
-      filter: since != null
-          ? (SmsFilter.where(SmsColumn.DATE)
-              .greaterThanOrEqualTo(since.millisecondsSinceEpoch.toString()))
-          : null,
+  /// Hard cap on how far back we ever scan, regardless of user input.
+  static const Duration _maxLookback = Duration(days: 90);
+
+  /// Fetch raw SMS messages from the inbox for the last 90 days (or [since],
+  /// whichever is more recent). Used by AI-first sync which classifies
+  /// entirely on the LLM side.
+  Future<List<SmsMessage>> fetchRaw({DateTime? since}) async {
+    final cap = DateTime.now().subtract(_maxLookback);
+    final effectiveSince = (since == null || since.isBefore(cap)) ? cap : since;
+    return _telephony.getInboxSms(
+      columns: [SmsColumn.ADDRESS, SmsColumn.BODY, SmsColumn.DATE],
+      filter: SmsFilter.where(SmsColumn.DATE)
+          .greaterThanOrEqualTo(effectiveSince.millisecondsSinceEpoch.toString()),
       sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.DESC)],
     );
+  }
+
+  /// Build TriageItems from raw SMS for the AI pipeline, using only the
+  /// cheap financial pre-filter (amount + a verb OR a known sender). Does
+  /// NOT insert anything; caller handles that via AppState.applyAiDecisions.
+  Future<List<TriageItem>> fetchRawForAi({DateTime? since}) async {
+    final messages = await fetchRaw(since: since);
+    final db = AppDb.instance;
+    final items = <TriageItem>[];
+    for (final m in messages) {
+      final sender = m.address ?? '';
+      final body = m.body ?? '';
+      if (body.isEmpty) continue;
+      final knownSender = SmsParser.isFinancialSender(sender);
+      final looksFinancial = SmsParser.looksFinancial(body);
+      if (!knownSender && !looksFinancial) continue;
+      final ts = m.date ?? DateTime.now().millisecondsSinceEpoch;
+      final hash = _hashSms(sender, body, ts);
+      if (await db.isSmsProcessed(hash)) continue;
+      items.add(TriageItem(
+        queueId: -1,
+        source: 'sms',
+        sender: sender,
+        body: body,
+      ));
+      await db.markSmsProcessed(hash);
+    }
+    return items;
+  }
+
+  /// Scan inbox for historical SMS and import matching ones.
+  /// [since] filters by date (inclusive). Clamped at 90 days back.
+  Future<ImportResult> scanInbox({DateTime? since}) async {
+    final messages = await fetchRaw(since: since);
 
     int imported = 0;
     int queued = 0;

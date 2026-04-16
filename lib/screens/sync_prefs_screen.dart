@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/ai_triage.dart';
 import '../services/background_sync.dart';
 import '../services/notifications.dart';
+import '../services/sync_prefs.dart';
 import '../widgets/bubble_card.dart';
 
 class SyncPrefsScreen extends StatefulWidget {
@@ -20,6 +22,7 @@ class _SyncPrefsScreenState extends State<SyncPrefsScreen> {
   bool _bgGmail = false;
   bool _notifyTxn = true;
   bool _notifyBudget = true;
+  bool _aiMode = false;
 
   @override
   void initState() {
@@ -29,11 +32,28 @@ class _SyncPrefsScreenState extends State<SyncPrefsScreen> {
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
+    final ai = await SyncPrefs.aiMode();
     setState(() {
       _bgGmail = prefs.getBool(_kBgGmail) ?? false;
       _notifyTxn = prefs.getBool(_kNotifyTxn) ?? true;
       _notifyBudget = prefs.getBool(_kNotifyBudget) ?? true;
+      _aiMode = ai;
     });
+  }
+
+  Future<void> _toggleAiMode(bool v) async {
+    if (v) {
+      final hasKey = await AiTriageService.instance.getApiKey() != null;
+      if (!hasKey) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Add your Anthropic API key in Settings → AI triage first')),
+        );
+        return;
+      }
+    }
+    await SyncPrefs.setAiMode(v);
+    setState(() => _aiMode = v);
   }
 
   Future<void> _setBool(String key, bool v) async {
@@ -78,6 +98,36 @@ class _SyncPrefsScreenState extends State<SyncPrefsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          const SectionHeader(title: 'AI CLASSIFICATION'),
+          BubbleCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Use AI to classify everything',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    'Every synced SMS and email goes to Claude Haiku for decision. '
+                    'Catches cases regex misses (e-mandate pairs, CC bill payments, '
+                    'promos with amounts, cross-source duplicates). Requires an API key.',
+                    style: TextStyle(color: scheme.onSurface.withOpacity(0.6), fontSize: 12.5, height: 1.35),
+                  ),
+                  value: _aiMode,
+                  onChanged: _toggleAiMode,
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Approx cost: ₹29 / 1000 SMS · ₹56 / 1000 emails. '
+                    'A full 90-day initial sync is usually under ₹70.',
+                    style: TextStyle(color: scheme.onSurface.withOpacity(0.55), fontSize: 11.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
           const SectionHeader(title: 'BACKGROUND SYNC'),
           BubbleCard(
             child: Column(
