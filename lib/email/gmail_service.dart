@@ -166,6 +166,8 @@ class GmailService {
   Future<List<TriageItem>> fetchRawForAi({
     DateTime? since,
     int maxMessages = 200,
+    void Function(int fetched, int total)? onProgress,
+    int concurrency = 10,
   }) async {
     final account = _signIn.currentUser ?? await _signIn.signInSilently();
     if (account == null) {
@@ -182,38 +184,62 @@ class GmailService {
         maxResults: maxMessages,
       );
       final msgs = list.messages ?? const [];
-      final items = <TriageItem>[];
+
+      // First pass: filter out already-processed IDs so we only fetch bodies
+      // for the ones we actually need.
       final db = AppDb.instance;
+      final needed = <String>[];
       for (final m in msgs) {
         final id = m.id;
         if (id == null) continue;
         if (await db.isEmailProcessed(id)) continue;
-        final full = await api.users.messages.get('me', id, format: 'full');
-        final headers = full.payload?.headers ?? const [];
-        String sender = '';
-        String subject = '';
-        for (final h in headers) {
-          final name = (h.name ?? '').toLowerCase();
-          if (name == 'from') {
-            sender = h.value ?? '';
-          } else if (name == 'subject') {
-            subject = h.value ?? '';
-          }
-        }
-        final body = _extractBody(full.payload);
-        items.add(TriageItem(
-          queueId: -1,
-          source: 'email',
-          sender: sender,
-          subject: subject.isEmpty ? null : subject,
-          body: body,
-          sourceId: id,
-          sourceDate: _messageDate(full),
-        ));
-        // NOTE: do NOT mark email processed here. The caller marks it AFTER
-        // the AI decision has been applied so that failures leave items
-        // available for the next sync.
+        needed.add(id);
       }
+      final total = needed.length;
+      if (total == 0) {
+        onProgress?.call(0, 0);
+        return const [];
+      }
+
+      // Fetch full messages in parallel windows. Gmail API handles concurrent
+      // requests fine; 10 in flight keeps well under per-minute quotas.
+      final items = <TriageItem>[];
+      var fetched = 0;
+      for (var start = 0; start < total; start += concurrency) {
+        final end = (start + concurrency).clamp(0, total);
+        final chunk = needed.sublist(start, end);
+        final fulls = await Future.wait(
+          chunk.map((id) => api.users.messages.get('me', id, format: 'full')),
+        );
+        for (var i = 0; i < fulls.length; i++) {
+          final full = fulls[i];
+          final id = chunk[i];
+          final headers = full.payload?.headers ?? const [];
+          String sender = '';
+          String subject = '';
+          for (final h in headers) {
+            final name = (h.name ?? '').toLowerCase();
+            if (name == 'from') {
+              sender = h.value ?? '';
+            } else if (name == 'subject') {
+              subject = h.value ?? '';
+            }
+          }
+          final body = _extractBody(full.payload);
+          items.add(TriageItem(
+            queueId: -1,
+            source: 'email',
+            sender: sender,
+            subject: subject.isEmpty ? null : subject,
+            body: body,
+            sourceId: id,
+            sourceDate: _messageDate(full),
+          ));
+        }
+        fetched += chunk.length;
+        onProgress?.call(fetched, total);
+      }
+
       return items;
     } finally {
       client.close();
