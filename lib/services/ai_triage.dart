@@ -10,6 +10,7 @@ class AiDecision {
   final String? type; // "debit" | "credit" | "transfer"
   final String? merchant;
   final String? category;
+  final String? accountHint;
   final String confidence; // "high" | "medium" | "low"
   final String? reasoning;
 
@@ -19,6 +20,7 @@ class AiDecision {
     this.type,
     this.merchant,
     this.category,
+    this.accountHint,
     required this.confidence,
     this.reasoning,
   });
@@ -29,6 +31,7 @@ class AiDecision {
         type: j['type'] as String?,
         merchant: j['merchant'] as String?,
         category: j['category'] as String?,
+        accountHint: j['account_hint'] as String?,
         confidence: (j['confidence'] as String?) ?? 'low',
         reasoning: j['reasoning'] as String?,
       );
@@ -169,13 +172,14 @@ class AiTriageService {
   Future<AiTriageResult> triage(
     List<TriageItem> items, {
     required List<String> categories,
+    List<String> accountHints = const [],
   }) async {
     if (items.isEmpty) {
       return AiTriageResult(
           decisions: const [], cost: const AiTriageCost(inputTokens: 0, outputTokens: 0));
     }
 
-    final sys = _systemPrompt(categories);
+    final sys = _systemPrompt(categories, accountHints: accountHints);
     final body = StringBuffer();
     body.writeln(
       'Classify each of the ${items.length} items below. '
@@ -322,13 +326,21 @@ class AiTriageService {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  String _systemPrompt(List<String> categories) {
+  String _systemPrompt(
+    List<String> categories, {
+    List<String> accountHints = const [],
+  }) {
     final catList = categories.map((c) => '"$c"').join(', ');
+    final accountBlock = accountHints.isEmpty
+        ? 'The user has not configured named accounts.'
+        : 'The user\'s accounts:\n${accountHints.map((a) => '- $a').join('\n')}';
     return '''You are a financial transaction classifier for a personal expense tracker.
 
-For each item you receive — an SMS or email snippet from a bank, card issuer, or merchant — decide whether it represents a real money-out-of-user's-pocket event that belongs in their expense log. Extract the amount, direction, merchant, and category.
+For each item you receive — an SMS or email snippet from a bank, card issuer, or merchant — decide whether it represents a real money event that belongs in the user's expense log. Extract the amount, direction, merchant, category, and (when possible) which of the user's accounts it came from.
 
 Categories (pick exactly one or null): $catList
+
+$accountBlock
 
 Return a JSON array. Each item has the shape:
 {
@@ -337,23 +349,28 @@ Return a JSON array. Each item has the shape:
   "type": "debit" | "credit" | "transfer" | null,
   "merchant": string | null,
   "category": string | null,
+  "account_hint": string | null,
   "confidence": "high" | "medium" | "low",
   "reasoning": string
 }
+
+`account_hint`: if you can identify which of the user's accounts this came from (based on the last 4 digits mentioned in the text matching one of the accounts listed, or by issuer name), put the account's exact name. Otherwise null.
 
 Rules:
 - **OTP** messages, login codes, verification codes → is_transaction: false, confidence: high.
 - **Promotional** / deal / newsletter / "offer ends soon" emails → false, high.
 - **Delivery updates** (shipped, out for delivery, delivered) without payment wording → false, high.
 - **Future payment notices** ("upcoming e-mandate", "will be debited on X", "scheduled auto-payment") → false, high.
-- **Credit card bill payment** where the message says the payment was received on the user's own credit card (the other side of a bank debit) → is_transaction: false (so it doesn't double-count), category: "Transfer", reasoning: explain.
+- **Credit card bill payment** where the message says the payment was received on the user's own credit card (the other side of a bank debit) → is_transaction: false.
+- **Credit card cash advance to a bank account** (e.g. "Rs 3000 debited from your HDFC CC, credited to your Axis savings account") → is_transaction: true, type: "transfer", category: "Transfer". This is an INTRA-ACCOUNT transfer — money moved between two of the user's own accounts, no expense happened.
+- If you see a matching pair in the same batch (one CC debit + one bank credit for the same amount on the same day) both should be classified as "transfer" with the same reasoning.
 - **Refund received** → is_transaction: true, type: "credit", category: best-fit.
 - **Normal debit / purchase** → is_transaction: true, type: "debit", category: best-fit.
 - **Salary / income** → is_transaction: true, type: "credit", category: "Income".
-- If you're unsure whether it's a real transaction, set confidence: "low" and reasoning that explains the ambiguity.
-- Never invent amounts. If no amount is clearly the transaction amount, return null and low confidence.
+- Unsure? confidence: "low" with reasoning.
+- Never invent amounts. No amount visible → return null and low confidence.
 
-Return ONLY the raw JSON array. No prose. No markdown fences. Start your response with `[` and end with `]`.''';
+Return ONLY the raw JSON array. No prose. No markdown fences. Start with `[`, end with `]`.''';
   }
 }
 

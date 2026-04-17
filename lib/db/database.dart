@@ -16,7 +16,7 @@ class AppDb {
     final path = p.join(dir, 'expense_tracker.db');
     _db = await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -38,6 +38,13 @@ class AppDb {
     }
     if (oldVersion < 6) {
       await db.execute(_pendingRawItemsSchema);
+    }
+    if (oldVersion < 7) {
+      await db.execute(_accountsSchema);
+      // Extend transactions with account linkage.
+      await db.execute('ALTER TABLE transactions ADD COLUMN account_id INTEGER');
+      await db.execute('ALTER TABLE transactions ADD COLUMN to_account_id INTEGER');
+      await _seedCashAccount(db);
     }
   }
 
@@ -98,6 +105,39 @@ class AppDb {
     )
   ''';
 
+  /// Accounts (cash, bank accounts, credit cards, wallets). Every
+  /// transaction is linked to one; transfers link to two.
+  static const _accountsSchema = '''
+    CREATE TABLE accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL,
+      issuer TEXT,
+      last_4 TEXT,
+      color INTEGER NOT NULL,
+      icon INTEGER NOT NULL,
+      credit_limit REAL,
+      statement_day INTEGER,
+      due_day INTEGER,
+      active INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    )
+  ''';
+
+  static Future<void> _seedCashAccount(Database db) async {
+    await db.insert(
+      'accounts',
+      {
+        'name': 'Cash',
+        'type': 'cash',
+        'color': 0xFF9AA0A6,
+        'icon': 0xe8f3, // Icons.payments.codePoint — matches category icon
+        'sort_order': 0,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
       CREATE TABLE categories (
@@ -119,7 +159,11 @@ class AppDb {
         raw_sms TEXT,
         account TEXT,
         note TEXT,
-        FOREIGN KEY(category_id) REFERENCES categories(id)
+        account_id INTEGER,
+        to_account_id INTEGER,
+        FOREIGN KEY(category_id) REFERENCES categories(id),
+        FOREIGN KEY(account_id) REFERENCES accounts(id),
+        FOREIGN KEY(to_account_id) REFERENCES accounts(id)
       )
     ''');
     await db.execute('CREATE INDEX idx_txn_date ON transactions(date)');
@@ -159,6 +203,8 @@ class AppDb {
     await db.execute(_emailSendersSchema);
     await db.execute(_pendingEmailsSchema);
     await db.execute(_pendingRawItemsSchema);
+    await db.execute(_accountsSchema);
+    await _seedCashAccount(db);
 
     await _seedCategories(db);
   }
@@ -181,6 +227,37 @@ class AppDb {
     for (final c in defaults) {
       await db.insert('categories', c);
     }
+  }
+
+  // Accounts
+  Future<List<Account>> listAccounts({bool onlyActive = false}) async {
+    final d = await db;
+    final rows = await d.query(
+      'accounts',
+      where: onlyActive ? 'active = 1' : null,
+      orderBy: 'sort_order ASC, name ASC',
+    );
+    return rows.map(Account.fromMap).toList();
+  }
+
+  Future<int> upsertAccount(Account a) async {
+    final d = await db;
+    if (a.id == null) return d.insert('accounts', a.toMap());
+    return d.update('accounts', a.toMap(), where: 'id=?', whereArgs: [a.id]);
+  }
+
+  Future<int> deleteAccount(int id) async =>
+      (await db).delete('accounts', where: 'id=? AND name != ?', whereArgs: [id, 'Cash']);
+
+  /// Total spent from a given account in the window, excluding transfers.
+  Future<double> accountSpent(int accountId, DateTime from, DateTime to) async {
+    final d = await db;
+    final rows = await d.rawQuery(
+      'SELECT SUM(amount) as total FROM transactions '
+      'WHERE account_id = ? AND type = ? AND date >= ? AND date <= ?',
+      [accountId, TxnType.debit, from.millisecondsSinceEpoch, to.millisecondsSinceEpoch],
+    );
+    return (rows.first['total'] as num?)?.toDouble() ?? 0;
   }
 
   // Categories
@@ -208,7 +285,14 @@ class AppDb {
   Future<int> deleteTxn(int id) async =>
       (await db).delete('transactions', where: 'id=?', whereArgs: [id]);
 
-  Future<List<Txn>> listTxns({DateTime? from, DateTime? to, int? categoryId, String? type, int? limit}) async {
+  Future<List<Txn>> listTxns({
+    DateTime? from,
+    DateTime? to,
+    int? categoryId,
+    String? type,
+    int? accountId,
+    int? limit,
+  }) async {
     final d = await db;
     final where = <String>[];
     final args = <Object?>[];
@@ -227,6 +311,11 @@ class AppDb {
     if (type != null) {
       where.add('type = ?');
       args.add(type);
+    }
+    if (accountId != null) {
+      where.add('(account_id = ? OR to_account_id = ?)');
+      args.add(accountId);
+      args.add(accountId);
     }
     final rows = await d.query(
       'transactions',

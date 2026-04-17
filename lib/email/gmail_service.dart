@@ -339,13 +339,14 @@ class GmailService {
 
   String _extractBody(gmail.MessagePart? part) {
     if (part == null) return '';
-    // Prefer text/plain, then text/html, then recurse into parts.
     final mime = part.mimeType ?? '';
     if ((mime == 'text/plain' || mime == 'text/html') && part.body?.data != null) {
-      return _decode(part.body!.data!);
+      final raw = _decode(part.body!.data!);
+      // HTML bodies are mostly markup — strip tags so Claude sees actual
+      // text within the 1500-char window.
+      return mime == 'text/html' ? _stripHtml(raw) : raw;
     }
     final sub = part.parts ?? const [];
-    // Prefer plain
     for (final p in sub) {
       if ((p.mimeType ?? '') == 'text/plain') {
         final b = _extractBody(p);
@@ -363,6 +364,28 @@ class GmailService {
       if (b.isNotEmpty) return b;
     }
     return '';
+  }
+
+  static String _stripHtml(String s) {
+    if (!s.contains('<')) return s;
+    var out = s
+        .replaceAll(RegExp(r'<script[^>]*>.*?</script>', dotAll: true, caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'<style[^>]*>.*?</style>', dotAll: true, caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'<[^>]+>'), ' ');
+    const entities = {
+      '&nbsp;': ' ',
+      '&amp;': '&',
+      '&lt;': '<',
+      '&gt;': '>',
+      '&quot;': '"',
+      '&#39;': "'",
+      '&rsquo;': "'",
+      '&lsquo;': "'",
+      '&rupee;': '₹',
+      '&#8377;': '₹',
+    };
+    entities.forEach((k, v) => out = out.replaceAll(k, v));
+    return out.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   String _decode(String urlSafeB64) {

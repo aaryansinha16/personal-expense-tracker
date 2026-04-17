@@ -15,6 +15,7 @@ class AppState extends ChangeNotifier {
   final MonthlySetupService _setupSvc = MonthlySetupService.instance;
 
   List<Category> categories = [];
+  List<Account> accounts = [];
   List<Txn> recentTxns = [];
   List<Budget> budgets = [];
   List<PendingSms> pendingSms = [];
@@ -40,6 +41,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> refreshAll() async {
     categories = await _db.listCategories();
+    accounts = await _db.listAccounts();
     budgets = await _db.listBudgets();
     pendingSms = await _db.listPendingSms();
     pendingEmails = await _db.listPendingEmails();
@@ -215,15 +217,20 @@ class AppState extends ChangeNotifier {
         }
       } else if (d.isTransaction && d.amount != null && d.amount! > 0) {
         final categoryId = _findCategoryId(d.category);
+        final txnType = d.type == 'transfer'
+            ? TxnType.transfer
+            : (d.type == 'credit' ? TxnType.credit : TxnType.debit);
+        final accountId = _findAccountIdByHint(d.accountHint);
         final candidate = Txn(
           amount: d.amount!,
-          type: d.type == 'credit' ? TxnType.credit : TxnType.debit,
+          type: txnType,
           categoryId: categoryId,
           merchant: d.merchant,
           date: txnDate,
           source: it.source == 'sms' ? TxnSource.sms : TxnSource.email,
           account: it.sourceAccount,
           note: d.reasoning,
+          accountId: accountId,
         );
         final dup = await TransactionDeduper.findDuplicate(candidate);
         if (dup == null) {
@@ -278,10 +285,12 @@ class AppState extends ChangeNotifier {
       return AiTriageApplyResult(imported: 0, dismissed: 0, kept: 0, usdCost: 0);
     }
     final categoryNames = categories.map((c) => c.name).toList();
+    final accountHints = _buildAccountHints();
     final pipeline = AiPipeline();
     final result = await pipeline.classifyAll(
       items,
       categories: categoryNames,
+      accountHints: accountHints,
       onProgress: onProgress,
     );
     final applied = await applyAiDecisions(
@@ -324,8 +333,13 @@ class AppState extends ChangeNotifier {
     }
 
     final categoryNames = categories.map((c) => c.name).toList();
+    final accountHints = _buildAccountHints();
     final pipeline = AiPipeline();
-    final result = await pipeline.classifyAll(items, categories: categoryNames);
+    final result = await pipeline.classifyAll(
+      items,
+      categories: categoryNames,
+      accountHints: accountHints,
+    );
 
     return applyAiDecisions(
       items,
@@ -341,6 +355,33 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  List<String> _buildAccountHints() {
+    return accounts.map((a) {
+      final parts = <String>[a.name];
+      if (a.type == AccountType.creditCard) parts.add('type: credit card');
+      if (a.type == AccountType.bank) parts.add('type: bank');
+      if (a.type == AccountType.wallet) parts.add('type: wallet');
+      if (a.issuer != null) parts.add('issuer: ${a.issuer}');
+      if (a.last4 != null) parts.add('last 4: ${a.last4}');
+      return parts.join(', ');
+    }).toList();
+  }
+
+  int? _findAccountIdByHint(String? hint) {
+    if (hint == null || hint.trim().isEmpty) return null;
+    final h = hint.trim().toLowerCase();
+    // Exact name match first, then partial (e.g. "Axis CC" hint vs "Axis CC •4567")
+    for (final a in accounts) {
+      if (a.name.toLowerCase() == h) return a.id;
+    }
+    for (final a in accounts) {
+      if (a.name.toLowerCase().contains(h) || h.contains(a.name.toLowerCase())) {
+        return a.id;
+      }
+    }
+    return null;
+  }
+
   Future<void> addCategory(Category c) async {
     await _db.insertCategory(c);
     await refreshAll();
@@ -353,6 +394,24 @@ class AppState extends ChangeNotifier {
 
   Future<void> deleteCategory(int id) async {
     await _db.deleteCategory(id);
+    await refreshAll();
+  }
+
+  Account? accountById(int? id) {
+    if (id == null) return null;
+    for (final a in accounts) {
+      if (a.id == id) return a;
+    }
+    return null;
+  }
+
+  Future<void> upsertAccount(Account a) async {
+    await _db.upsertAccount(a);
+    await refreshAll();
+  }
+
+  Future<void> deleteAccount(int id) async {
+    await _db.deleteAccount(id);
     await refreshAll();
   }
 }
