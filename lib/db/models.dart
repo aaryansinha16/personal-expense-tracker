@@ -1,6 +1,108 @@
 class TxnType {
   static const debit = 'debit';
   static const credit = 'credit';
+  /// Intra-account movement (e.g. CC cash advance to a bank account). Does
+  /// NOT count in expense/income totals. Has both account_id (from) and
+  /// to_account_id (to).
+  static const transfer = 'transfer';
+}
+
+class AccountType {
+  static const cash = 'cash';
+  static const bank = 'bank';
+  static const creditCard = 'credit_card';
+  static const wallet = 'wallet';
+}
+
+class Account {
+  final int? id;
+  final String name;
+  final String type;
+  final String? issuer;
+  final String? last4;
+  final int color;
+  final int icon;
+  final double? creditLimit;
+  final int? statementDay;
+  final int? dueDay;
+  final bool active;
+  final int sortOrder;
+
+  Account({
+    this.id,
+    required this.name,
+    required this.type,
+    this.issuer,
+    this.last4,
+    required this.color,
+    required this.icon,
+    this.creditLimit,
+    this.statementDay,
+    this.dueDay,
+    this.active = true,
+    this.sortOrder = 0,
+  });
+
+  bool get isCreditCard => type == AccountType.creditCard;
+
+  Map<String, dynamic> toMap() => {
+        if (id != null) 'id': id,
+        'name': name,
+        'type': type,
+        'issuer': issuer,
+        'last_4': last4,
+        'color': color,
+        'icon': icon,
+        'credit_limit': creditLimit,
+        'statement_day': statementDay,
+        'due_day': dueDay,
+        'active': active ? 1 : 0,
+        'sort_order': sortOrder,
+      };
+
+  factory Account.fromMap(Map<String, dynamic> m) => Account(
+        id: m['id'] as int?,
+        name: m['name'] as String,
+        type: m['type'] as String,
+        issuer: m['issuer'] as String?,
+        last4: m['last_4'] as String?,
+        color: m['color'] as int,
+        icon: m['icon'] as int,
+        creditLimit: (m['credit_limit'] as num?)?.toDouble(),
+        statementDay: m['statement_day'] as int?,
+        dueDay: m['due_day'] as int?,
+        active: ((m['active'] as int?) ?? 1) == 1,
+        sortOrder: (m['sort_order'] as int?) ?? 0,
+      );
+
+  Account copyWith({
+    int? id,
+    String? name,
+    String? type,
+    String? issuer,
+    String? last4,
+    int? color,
+    int? icon,
+    double? creditLimit,
+    int? statementDay,
+    int? dueDay,
+    bool? active,
+    int? sortOrder,
+  }) =>
+      Account(
+        id: id ?? this.id,
+        name: name ?? this.name,
+        type: type ?? this.type,
+        issuer: issuer ?? this.issuer,
+        last4: last4 ?? this.last4,
+        color: color ?? this.color,
+        icon: icon ?? this.icon,
+        creditLimit: creditLimit ?? this.creditLimit,
+        statementDay: statementDay ?? this.statementDay,
+        dueDay: dueDay ?? this.dueDay,
+        active: active ?? this.active,
+        sortOrder: sortOrder ?? this.sortOrder,
+      );
 }
 
 class TxnSource {
@@ -43,6 +145,11 @@ class Txn {
   final String? rawSms;
   final String? account;
   final String? note;
+  /// The account this transaction came FROM. Null for legacy rows that
+  /// haven't been assigned yet.
+  final int? accountId;
+  /// For `type: transfer`, the account the money moved TO. Null otherwise.
+  final int? toAccountId;
 
   Txn({
     this.id,
@@ -55,7 +162,11 @@ class Txn {
     this.rawSms,
     this.account,
     this.note,
+    this.accountId,
+    this.toAccountId,
   });
+
+  bool get isTransfer => type == TxnType.transfer;
 
   Map<String, dynamic> toMap() => {
         if (id != null) 'id': id,
@@ -68,6 +179,8 @@ class Txn {
         'raw_sms': rawSms,
         'account': account,
         'note': note,
+        'account_id': accountId,
+        'to_account_id': toAccountId,
       };
 
   factory Txn.fromMap(Map<String, dynamic> m) => Txn(
@@ -81,6 +194,8 @@ class Txn {
         rawSms: m['raw_sms'] as String?,
         account: m['account'] as String?,
         note: m['note'] as String?,
+        accountId: m['account_id'] as int?,
+        toAccountId: m['to_account_id'] as int?,
       );
 
   Txn copyWith({
@@ -94,6 +209,8 @@ class Txn {
     String? rawSms,
     String? account,
     String? note,
+    int? accountId,
+    int? toAccountId,
   }) =>
       Txn(
         id: id ?? this.id,
@@ -106,6 +223,8 @@ class Txn {
         rawSms: rawSms ?? this.rawSms,
         account: account ?? this.account,
         note: note ?? this.note,
+        accountId: accountId ?? this.accountId,
+        toAccountId: toAccountId ?? this.toAccountId,
       );
 }
 

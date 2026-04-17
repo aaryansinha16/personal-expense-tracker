@@ -34,6 +34,8 @@ class _AddTxnScreenState extends State<AddTxnScreen> {
   late TextEditingController _merchant;
   late TextEditingController _note;
   int? _categoryId;
+  int? _accountId;
+  int? _toAccountId;
   late DateTime _date;
 
   @override
@@ -45,12 +47,17 @@ class _AddTxnScreenState extends State<AddTxnScreen> {
     _merchant = TextEditingController(text: e?.merchant ?? widget.presetMerchant ?? '');
     _note = TextEditingController(text: e?.note ?? '');
     _categoryId = e?.categoryId ?? widget.presetCategoryId;
+    _accountId = e?.accountId;
+    _toAccountId = e?.toAccountId;
     _date = e?.date ?? DateTime.now();
   }
+
+  bool get _isTransfer => _type == TxnType.transfer;
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+    final accounts = state.accounts;
 
     return Scaffold(
       appBar: AppBar(
@@ -82,17 +89,34 @@ class _AddTxnScreenState extends State<AddTxnScreen> {
                   selectedForegroundColor: Theme.of(context).colorScheme.onPrimary,
                 ),
                 segments: const [
-                  ButtonSegment(value: TxnType.debit, label: Text('Expense'), icon: Icon(Icons.arrow_upward_rounded)),
-                  ButtonSegment(value: TxnType.credit, label: Text('Income'), icon: Icon(Icons.arrow_downward_rounded)),
+                  ButtonSegment(
+                      value: TxnType.debit,
+                      label: Text('Expense'),
+                      icon: Icon(Icons.arrow_upward_rounded)),
+                  ButtonSegment(
+                      value: TxnType.credit,
+                      label: Text('Income'),
+                      icon: Icon(Icons.arrow_downward_rounded)),
+                  ButtonSegment(
+                      value: TxnType.transfer,
+                      label: Text('Transfer'),
+                      icon: Icon(Icons.swap_horiz_rounded)),
                 ],
                 selected: {_type},
-                onSelectionChanged: (s) => setState(() => _type = s.first),
+                onSelectionChanged: (s) {
+                  setState(() {
+                    _type = s.first;
+                    // Transfer mode: category doesn't apply; clear to avoid confusion.
+                    if (_isTransfer) _categoryId = null;
+                  });
+                },
               ),
             ),
             const SizedBox(height: 14),
             TextFormField(
               controller: _amount,
-              decoration: const InputDecoration(labelText: 'Amount (₹)', prefixIcon: Icon(Icons.currency_rupee_rounded)),
+              decoration: const InputDecoration(
+                  labelText: 'Amount (₹)', prefixIcon: Icon(Icons.currency_rupee_rounded)),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
               validator: (v) {
@@ -102,20 +126,78 @@ class _AddTxnScreenState extends State<AddTxnScreen> {
               },
             ),
             const SizedBox(height: 12),
-            TextFormField(
-              controller: _merchant,
-              decoration: const InputDecoration(labelText: 'Merchant / description', prefixIcon: Icon(Icons.storefront_rounded)),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<int>(
-              initialValue: _categoryId,
-              decoration: const InputDecoration(labelText: 'Category', prefixIcon: Icon(Icons.category_rounded)),
-              borderRadius: BorderRadius.circular(18),
-              items: state.categories
-                  .map((c) => DropdownMenuItem<int>(value: c.id, child: Text(c.name)))
-                  .toList(),
-              onChanged: (v) => setState(() => _categoryId = v),
-            ),
+            if (!_isTransfer) ...[
+              TextFormField(
+                controller: _merchant,
+                decoration: const InputDecoration(
+                    labelText: 'Merchant / description',
+                    prefixIcon: Icon(Icons.storefront_rounded)),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                initialValue: _categoryId,
+                decoration: const InputDecoration(
+                    labelText: 'Category', prefixIcon: Icon(Icons.category_rounded)),
+                borderRadius: BorderRadius.circular(18),
+                items: state.categories
+                    .map((c) => DropdownMenuItem<int>(value: c.id, child: Text(c.name)))
+                    .toList(),
+                onChanged: (v) => setState(() => _categoryId = v),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int?>(
+                initialValue: _accountId,
+                decoration: const InputDecoration(
+                    labelText: 'Account / card (source of money)',
+                    prefixIcon: Icon(Icons.credit_card_rounded)),
+                borderRadius: BorderRadius.circular(18),
+                items: [
+                  const DropdownMenuItem<int?>(value: null, child: Text('Unassigned')),
+                  ...accounts.map(
+                      (a) => DropdownMenuItem<int?>(value: a.id, child: Text(a.name))),
+                ],
+                onChanged: (v) => setState(() => _accountId = v),
+              ),
+            ] else ...[
+              DropdownButtonFormField<int?>(
+                initialValue: _accountId,
+                decoration: const InputDecoration(
+                    labelText: 'From',
+                    prefixIcon: Icon(Icons.arrow_circle_up_rounded)),
+                borderRadius: BorderRadius.circular(18),
+                items: accounts
+                    .map(
+                        (a) => DropdownMenuItem<int?>(value: a.id, child: Text(a.name)))
+                    .toList(),
+                onChanged: (v) => setState(() => _accountId = v),
+                validator: (v) => v == null ? 'Pick a source' : null,
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<int?>(
+                initialValue: _toAccountId,
+                decoration: const InputDecoration(
+                    labelText: 'To',
+                    prefixIcon: Icon(Icons.arrow_circle_down_rounded)),
+                borderRadius: BorderRadius.circular(18),
+                items: accounts
+                    .map(
+                        (a) => DropdownMenuItem<int?>(value: a.id, child: Text(a.name)))
+                    .toList(),
+                onChanged: (v) => setState(() => _toAccountId = v),
+                validator: (v) {
+                  if (v == null) return 'Pick a destination';
+                  if (v == _accountId) return 'From and To must differ';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _merchant,
+                decoration: const InputDecoration(
+                    labelText: 'Note / description (optional)',
+                    prefixIcon: Icon(Icons.notes_rounded)),
+              ),
+            ],
             const SizedBox(height: 12),
             BubbleCard(
               padding: EdgeInsets.zero,
@@ -135,17 +217,20 @@ class _AddTxnScreenState extends State<AddTxnScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            TextFormField(
-              controller: _note,
-              decoration: const InputDecoration(labelText: 'Note', prefixIcon: Icon(Icons.notes_rounded)),
-              maxLines: 2,
-            ),
+            if (!_isTransfer)
+              TextFormField(
+                controller: _note,
+                decoration: const InputDecoration(
+                    labelText: 'Note', prefixIcon: Icon(Icons.notes_rounded)),
+                maxLines: 2,
+              ),
             const SizedBox(height: 24),
             FilledButton(
               onPressed: _save,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Text(widget.edit == null ? 'Save transaction' : 'Update', style: const TextStyle(fontSize: 15)),
+                child: Text(widget.edit == null ? 'Save transaction' : 'Update',
+                    style: const TextStyle(fontSize: 15)),
               ),
             ),
           ],
@@ -169,6 +254,8 @@ class _AddTxnScreenState extends State<AddTxnScreen> {
         merchant: merchant,
         date: _date,
         note: note,
+        accountId: _accountId,
+        toAccountId: _isTransfer ? _toAccountId : null,
       ));
     } else if (widget.fromPending != null) {
       await state.resolvePendingSms(
@@ -182,6 +269,8 @@ class _AddTxnScreenState extends State<AddTxnScreen> {
           source: TxnSource.sms,
           rawSms: widget.fromPending!.body,
           note: note,
+          accountId: _accountId,
+          toAccountId: _isTransfer ? _toAccountId : null,
         ),
       );
     } else {
@@ -193,6 +282,8 @@ class _AddTxnScreenState extends State<AddTxnScreen> {
         date: _date,
         source: TxnSource.manual,
         note: note,
+        accountId: _accountId,
+        toAccountId: _isTransfer ? _toAccountId : null,
       ));
     }
     if (mounted) Navigator.of(context).pop();

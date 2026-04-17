@@ -40,6 +40,7 @@ class AiPipeline {
   Future<PipelineResult> classifyAll(
     List<TriageItem> items, {
     required List<String> categories,
+    List<String> accountHints = const [],
     void Function(PipelineProgress)? onProgress,
   }) async {
     if (items.isEmpty) {
@@ -54,7 +55,7 @@ class AiPipeline {
       final end = (start + batchSize).clamp(0, items.length);
       final batch = items.sublist(start, end);
       try {
-        final res = await _ai.triage(batch, categories: categories);
+        final res = await _ai.triage(batch, categories: categories, accountHints: accountHints);
         decisions.addAll(res.decisions);
         totalUsd += res.cost.usd;
       } catch (e) {
